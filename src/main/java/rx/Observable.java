@@ -20,7 +20,6 @@ import rx.functions.*;
 import rx.internal.operators.*;
 import rx.internal.util.ScalarSynchronousObservable;
 import rx.internal.util.UtilityFunctions;
-
 import rx.observables.*;
 import rx.observers.SafeSubscriber;
 import rx.plugins.*;
@@ -46,6 +45,8 @@ import rx.subscriptions.Subscriptions;
 public class Observable<T> {
 
     final OnSubscribe<T> onSubscribe;
+    
+    public static final Observable<?> EMPTY = from(Collections.emptyList());
 
     /**
      * Creates an Observable with a Function to execute when it is subscribed to.
@@ -1021,7 +1022,8 @@ public class Observable<T> {
 
     /**
      * Returns an Observable that emits no items to the {@link Observer} and immediately invokes its
-     * {@link Observer#onCompleted onCompleted} method.
+     * {@link Observer#onCompleted onCompleted} method. The returned object is a singleton for all T (calling this method
+     * multiple times returns the same object).
      * <p>
      * <img width="640" height="190" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/empty.png" alt="">
      * <dl>
@@ -1035,8 +1037,9 @@ public class Observable<T> {
      *         {@link Observer}'s {@link Observer#onCompleted() onCompleted} method
      * @see <a href="https://github.com/ReactiveX/RxJava/wiki/Creating-Observables#empty-error-and-never">RxJava wiki: empty</a>
      */
+    @SuppressWarnings("unchecked")
     public final static <T> Observable<T> empty() {
-        return from(Collections.<T>emptyList());
+        return (Observable<T>) EMPTY;
     }
 
     /**
@@ -1669,7 +1672,12 @@ public class Observable<T> {
      */
     @SuppressWarnings("unchecked")
     public final static <T> Observable<T> merge(Observable<? extends T> t1, Observable<? extends T> t2) {
-        return merge(from(Arrays.asList(t1, t2)));
+        if (t1 == EMPTY) 
+            return (Observable<T>) t2;
+        else if (t2 == EMPTY)
+            return (Observable<T>) t1;
+        else 
+            return merge(from(Arrays.asList(t1, t2)));
     }
 
     /**
