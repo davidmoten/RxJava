@@ -20,15 +20,14 @@ import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -36,7 +35,9 @@ import org.mockito.MockitoAnnotations;
 
 import rx.Observable;
 import rx.Observer;
+import rx.Producer;
 import rx.Subscriber;
+import rx.functions.Action2;
 import rx.functions.Func0;
 import rx.functions.Func1;
 import rx.functions.Func2;
@@ -269,27 +270,94 @@ public class OperatorScanTest {
         assertEquals(101, count.get());
     }
 
+    /**
+     * This uses the public API collect which uses scan under the covers.
+     */
     @Test
     public void testSeedFactory() {
         Observable<List<Integer>> o = Observable.range(1, 10)
-                .scan(new Func0<List<Integer>>() {
+                .collect(new Func0<List<Integer>>() {
 
                     @Override
                     public List<Integer> call() {
                         return new ArrayList<Integer>();
                     }
                     
-                }, new Func2<List<Integer>, Integer, List<Integer>>() {
+                }, new Action2<List<Integer>, Integer>() {
 
                     @Override
-                    public List<Integer> call(List<Integer> list, Integer t2) {
+                    public void call(List<Integer> list, Integer t2) {
                         list.add(t2);
-                        return list;
                     }
 
                 }).takeLast(1);
 
         assertEquals(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), o.toBlocking().single());
         assertEquals(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), o.toBlocking().single());
+    }
+
+    @Test
+    public void testScanWithRequestOne() {
+        Observable<Integer> o = Observable.just(1, 2).scan(0, new Func2<Integer, Integer, Integer>() {
+
+            @Override
+            public Integer call(Integer t1, Integer t2) {
+                return t1 + t2;
+            }
+
+        }).take(1);
+        TestSubscriber<Integer> subscriber = new TestSubscriber<Integer>();
+        o.subscribe(subscriber);
+        subscriber.assertReceivedOnNext(Arrays.asList(0));
+        subscriber.assertTerminalEvent();
+        subscriber.assertNoErrors();
+    }
+
+    @Test
+    public void testScanShouldNotRequestZero() {
+        final AtomicReference<Producer> producer = new AtomicReference<Producer>();
+        Observable<Integer> o = Observable.create(new Observable.OnSubscribe<Integer>() {
+            @Override
+            public void call(final Subscriber subscriber) {
+                Producer p = spy(new Producer() {
+
+                    private AtomicBoolean requested = new AtomicBoolean(false);
+
+                    @Override
+                    public void request(long n) {
+                        if (requested.compareAndSet(false, true)) {
+                            subscriber.onNext(1);
+                        } else {
+                            subscriber.onCompleted();
+                        }
+                    }
+                });
+                producer.set(p);
+                subscriber.setProducer(p);
+            }
+        }).scan(100, new Func2<Integer, Integer, Integer>() {
+
+            @Override
+            public Integer call(Integer t1, Integer t2) {
+                return t1 + t2;
+            }
+
+        });
+
+        o.subscribe(new TestSubscriber<Integer>() {
+
+            @Override
+            public void onStart() {
+                request(1);
+            }
+
+            @Override
+            public void onNext(Integer integer) {
+                request(1);
+            }
+        });
+
+        verify(producer.get(), never()).request(0);
+        verify(producer.get(), times(2)).request(1);
     }
 }

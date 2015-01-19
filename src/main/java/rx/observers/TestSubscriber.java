@@ -16,12 +16,9 @@
 package rx.observers;
 
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
-import rx.Notification;
-import rx.Observer;
-import rx.Subscriber;
+import rx.*;
 
 /**
  * A {@code TestSubscriber} is a variety of {@link Subscriber} that you can use for unit testing, to perform
@@ -136,8 +133,8 @@ public class TestSubscriber<T> extends Subscriber<T> {
     /**
      * Allow calling the protected {@link #request(long)} from unit tests.
      *
-     * @param n
-     * @warn parameter "n" not described
+     * @param n the maximum number of items you want the Observable to emit to the Subscriber at this time, or
+     *           {@code Long.MAX_VALUE} if you want the Observable to emit items at its own pace
      */
     public void requestMore(long n) {
         request(n);
@@ -229,7 +226,9 @@ public class TestSubscriber<T> extends Subscriber<T> {
      */
     public void awaitTerminalEvent(long timeout, TimeUnit unit) {
         try {
-            latch.await(timeout, unit);
+            if (!latch.await(timeout, unit)) {
+                throw new RuntimeException(new TimeoutException());
+            }
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted", e);
         }

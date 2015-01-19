@@ -19,6 +19,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import rx.Subscription;
+import rx.annotations.Experimental;
 import rx.functions.Action0;
 import rx.functions.Actions;
 
@@ -30,12 +31,39 @@ public final class Subscriptions {
         throw new IllegalStateException("No instances!");
     }
     /**
-     * Returns a {@link Subscription} that does nothing.
-     * 
-     * @return a {@link Subscription} that does nothing
+     * Returns a {@link Subscription} to which {@code unsubscribe} does nothing except to change
+     * {@code isUnsubscribed} to {@code true}. It's stateful and {@code isUnsubscribed} indicates if
+     * {@code unsubscribe} is called, which is different from {@link #unsubscribed()}.
+     *
+     * <pre><code>
+     * Subscription empty = Subscriptions.empty();
+     * System.out.println(empty.isUnsubscribed()); // false
+     * empty.unsubscribe();
+     * System.out.println(empty.isUnsubscribed()); // true
+     * </code></pre>
+     *
+     * @return a {@link Subscription} to which {@code unsubscribe} does nothing except to change
+     *         {@code isUnsubscribed} to {@code true}
      */
     public static Subscription empty() {
-        return EMPTY;
+        return BooleanSubscription.create();
+    }
+
+    /**
+     * Returns a {@link Subscription} to which {@code unsubscribe} does nothing, as it is already unsubscribed.
+     * Its {@code isUnsubscribed} always returns {@code true}, which is different from {@link #empty()}.
+     *
+     * <pre><code>
+     * Subscription unsubscribed = Subscriptions.unsubscribed();
+     * System.out.println(unsubscribed.isUnsubscribed()); // true
+     * </code></pre>
+     *
+     * @return a {@link Subscription} to which {@code unsubscribe} does nothing, as it is already unsubscribed
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     */
+    @Experimental
+    public static Subscription unsubscribed() {
+        return UNSUBSCRIBED;
     }
 
     /**
@@ -46,38 +74,8 @@ public final class Subscriptions {
      * @return {@link Subscription}
      */
     public static Subscription create(final Action0 unsubscribe) {
-        return new ActionSubscription(unsubscribe);
+        return BooleanSubscription.create(unsubscribe);
     }
-    /**
-     * Subscription that delegates the unsubscription action to an Action0 instance
-     */
-    private static final class ActionSubscription implements Subscription {
-        volatile Action0 actual;
-        static final AtomicReferenceFieldUpdater<ActionSubscription, Action0> ACTUAL_UPDATER
-                = AtomicReferenceFieldUpdater.newUpdater(ActionSubscription.class, Action0.class, "actual");
-        public ActionSubscription(Action0 action) {
-            this.actual = action != null ? action : Actions.empty();
-        }
-        @Override
-        public boolean isUnsubscribed() {
-            return actual == UNSUBSCRIBED_ACTION;
-        }
-        @Override
-        public void unsubscribe() {
-            Action0 a = ACTUAL_UPDATER.getAndSet(this, UNSUBSCRIBED_ACTION);
-            a.call();
-        }
-        /** The no-op unique action indicating an unsubscribed state. */
-        private static final Unsubscribed UNSUBSCRIBED_ACTION = new Unsubscribed();
-        /** Naming classes helps with debugging. */
-        private static final class Unsubscribed implements Action0 {
-            @Override
-            public void call() {
-
-            }
-        }
-    }
-    
 
     /**
      * Converts a {@link Future} into a {@link Subscription} and cancels it when unsubscribed.
@@ -124,16 +122,16 @@ public final class Subscriptions {
     /**
      * A {@link Subscription} that does nothing when its unsubscribe method is called.
      */
-    private static final Empty EMPTY = new Empty();
+    private static final Unsubscribed UNSUBSCRIBED = new Unsubscribed();
         /** Naming classes helps with debugging. */
-    private static final class Empty implements Subscription {
+    private static final class Unsubscribed implements Subscription {
         @Override
         public void unsubscribe() {
         }
 
         @Override
         public boolean isUnsubscribed() {
-            return false;
+            return true;
         }
     }
 }
