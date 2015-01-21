@@ -100,4 +100,11 @@ public class MergeTests {
         assertTrue(values.get(3) instanceof HorrorMovie);
     }
 
+    @Test
+    public void testMergeNonEmptyWithEmptyReturnsNonEmpty() {
+        Observable<Integer> o = Observable.range(1,100);
+        Observable<Integer> empty = Observable.empty();
+        assertTrue(o == o.mergeWith(empty));
+        assertTrue(o == empty.mergeWith(o));
+    }
 }

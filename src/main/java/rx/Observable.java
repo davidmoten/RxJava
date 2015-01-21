@@ -49,8 +49,6 @@ public class Observable<T> {
 
     final OnSubscribe<T> onSubscribe;
     
-    public static final Observable<?> EMPTY = from(Collections.emptyList());
-
     /**
      * Creates an Observable with a Function to execute when it is subscribed to.
      * <p>
@@ -66,6 +64,7 @@ public class Observable<T> {
 
     private static final RxJavaObservableExecutionHook hook = RxJavaPlugins.getInstance().getObservableExecutionHook();
 
+    public static final Observable<?> EMPTY = from(Collections.emptyList());
     /**
      * Returns an Observable that will execute the specified function when a {@link Subscriber} subscribes to
      * it.
@@ -1175,6 +1174,13 @@ public class Observable<T> {
     public final static <T> Observable<T> from(Iterable<? extends T> iterable) {
         return create(new OnSubscribeFromIterable<T>(iterable));
     }
+    
+    public final static <T> Observable<T> from(Collection<? extends T> c) {
+        if (c.size() == 0)
+            return empty();
+        else 
+            return from((Iterable<? extends T>) c);
+    }
 
     /**
      * Converts an Array into an Observable that emits the items in the Array.
@@ -1193,7 +1199,10 @@ public class Observable<T> {
      * @see <a href="http://reactivex.io/documentation/operators/from.html">ReactiveX operators documentation: From</a>
      */
     public final static <T> Observable<T> from(T[] array) {
-        return from(Arrays.asList(array));
+        if (array.length==0)
+            return empty();
+        else 
+            return from(Arrays.asList(array));
     }
 
     /**
