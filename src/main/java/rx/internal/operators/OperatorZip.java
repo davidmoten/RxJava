@@ -117,6 +117,7 @@ public final class OperatorZip<R> implements Operator<R, Observable<?>[]> {
         return subscriber;
     }
 
+    @SuppressWarnings("rawtypes")
     private final class ZipSubscriber extends Subscriber<Observable[]> {
 
         final Subscriber<? super R> child;
@@ -158,7 +159,8 @@ public final class OperatorZip<R> implements Operator<R, Observable<?>[]> {
     }
 
     private static final class ZipProducer<R> extends AtomicLong implements Producer {
-
+        /** */
+        private static final long serialVersionUID = -1216676403723546796L;
         private Zip<R> zipper;
 
         public ZipProducer(Zip<R> zipper) {
@@ -167,7 +169,7 @@ public final class OperatorZip<R> implements Operator<R, Observable<?>[]> {
 
         @Override
         public void request(long n) {
-            addAndGet(n);
+            BackpressureUtils.getAndAddRequest(this, n);
             // try and claim emission if no other threads are doing so
             zipper.tick();
         }
@@ -179,6 +181,7 @@ public final class OperatorZip<R> implements Operator<R, Observable<?>[]> {
         private final FuncN<? extends R> zipFunction;
         private final CompositeSubscription childSubscription = new CompositeSubscription();
 
+        @SuppressWarnings("unused")
         volatile long counter;
         @SuppressWarnings("rawtypes")
         static final AtomicLongFieldUpdater<Zip> COUNTER_UPDATER = AtomicLongFieldUpdater.newUpdater(Zip.class, "counter");
@@ -220,17 +223,21 @@ public final class OperatorZip<R> implements Operator<R, Observable<?>[]> {
          */
         @SuppressWarnings("unchecked")
         void tick() {
+            final Object[] observers = this.observers;
             if (observers == null) {
                 // nothing yet to do (initial request from Producer)
                 return;
             }
             if (COUNTER_UPDATER.getAndIncrement(this) == 0) {
+                final int length = observers.length;
+                final Observer<? super R> child = this.child;
+                final AtomicLong requested = this.requested;
                 do {
-                    // we only emit if requested > 0
-                    while (requested.get() > 0) {
-                        final Object[] vs = new Object[observers.length];
+                    while (true) {
+                        // peek for a potential onCompleted event
+                        final Object[] vs = new Object[length];
                         boolean allHaveValues = true;
-                        for (int i = 0; i < observers.length; i++) {
+                        for (int i = 0; i < length; i++) {
                             RxRingBuffer buffer = ((InnerSubscriber) observers[i]).items;
                             Object n = buffer.peek();
 
@@ -249,7 +256,8 @@ public final class OperatorZip<R> implements Operator<R, Observable<?>[]> {
                                 vs[i] = buffer.getValue(n);
                             }
                         }
-                        if (allHaveValues) {
+                        // we only emit if requested > 0 and have all values available
+                        if (requested.get() > 0 && allHaveValues) {
                             try {
                                 // all have something so emit
                                 child.onNext(zipFunction.call(vs));

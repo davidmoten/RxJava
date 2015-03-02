@@ -110,7 +110,7 @@ public final class OnSubscribeCombineLatest<T, R> implements OnSubscribe<R> {
 
         @Override
         public void request(long n) {
-            requested.getAndAdd(n);
+            BackpressureUtils.getAndAddRequest(requested, n);
             if (!started.get() && started.compareAndSet(false, true)) {
                 /*
                  * NOTE: this logic will ONLY work if we don't have more sources than the size of the buffer.
@@ -230,9 +230,14 @@ public final class OnSubscribeCombineLatest<T, R> implements OnSubscribe<R> {
         }
 
         public void requestUpTo(long n) {
-            long r = Math.min(emitted.get(), n);
-            request(r);
-            emitted.addAndGet(-r);
+            do {
+                long r = emitted.get();
+                long u = Math.min(r, n);
+                if (emitted.compareAndSet(r, r - u)) {
+                    request(u);
+                    break;
+                }
+            } while (true);
         }
 
         @Override

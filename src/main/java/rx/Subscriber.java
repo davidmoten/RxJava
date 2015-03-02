@@ -40,13 +40,28 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
     private long requested = Long.MIN_VALUE; // default to not set
 
     protected Subscriber() {
-        this.op = null;
-        this.cs = new SubscriptionList();
+        this(null, false);
     }
 
     protected Subscriber(Subscriber<?> op) {
+        this(op, true);
+    }
+
+    /**
+     * Construct a Subscriber by using another Subscriber for backpressure and optionally sharing the
+     * underlying subscriptions list.
+     * <p>
+     * To retain the chaining of subscribers, add the created instance to {@code op} via {@link #add}.
+     * 
+     * @param op
+     *            the other Subscriber
+     * @param shareSubscriptions
+     *            {@code true} to share the subscription list in {@code op} with this instance
+     * @since 1.0.6
+     */
+    protected Subscriber(Subscriber<?> op, boolean shareSubscriptions) {
         this.op = op;
-        this.cs = op.cs;
+        this.cs = shareSubscriptions && op != null ? op.cs : new SubscriptionList();
     }
 
     /**
@@ -89,7 +104,17 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
      * Request a certain maximum number of emitted items from the Observable this Subscriber is subscribed to.
      * This is a way of requesting backpressure. To disable backpressure, pass {@code Long.MAX_VALUE} to this
      * method.
-     *
+     * <p>
+     * Requests are additive but if a sequence of requests totals more than {@code Long.MAX_VALUE} then 
+     * {@code Long.MAX_VALUE} requests will be actioned and the extras <i>may</i> be ignored. Arriving at 
+     * {@code Long.MAX_VALUE} by addition of requests cannot be assumed to disable backpressure. For example, 
+     * the code below may result in {@code Long.MAX_VALUE} requests being actioned only.
+     * 
+     * <pre>
+     * request(100);
+     * request(Long.MAX_VALUE-1);
+     * </pre>
+     * 
      * @param n the maximum number of items you want the Observable to emit to the Subscriber at this time, or
      *           {@code Long.MAX_VALUE} if you want the Observable to emit items at its own pace
      * @throws IllegalArgumentException

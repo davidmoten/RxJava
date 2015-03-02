@@ -15,13 +15,11 @@ package rx;
 import java.util.*;
 import java.util.concurrent.*;
 
-import rx.annotations.Beta;
-import rx.annotations.Experimental;
+import rx.annotations.*;
 import rx.exceptions.*;
 import rx.functions.*;
 import rx.internal.operators.*;
-import rx.internal.util.ScalarSynchronousObservable;
-import rx.internal.util.UtilityFunctions;
+import rx.internal.util.*;
 import rx.observables.*;
 import rx.observers.SafeSubscriber;
 import rx.plugins.*;
@@ -1031,6 +1029,14 @@ public class Observable<T> {
         return create(new OnSubscribeDefer<T>(observableFactory));
     }
 
+    /** An empty observable which just emits onCompleted to any subscriber. */
+    private static final Observable<Object> EMPTY = create(new OnSubscribe<Object>() {
+        @Override
+        public void call(Subscriber<? super Object> t1) {
+            t1.onCompleted();
+        }
+    });
+    
     /**
      * Returns an Observable that emits no items to the {@link Observer} and immediately invokes its
      * {@link Observer#onCompleted onCompleted} method.
@@ -1047,8 +1053,9 @@ public class Observable<T> {
      *         {@link Observer}'s {@link Observer#onCompleted() onCompleted} method
      * @see <a href="http://reactivex.io/documentation/operators/empty-never-throw.html">ReactiveX operators documentation: Empty</a>
      */
+    @SuppressWarnings("unchecked")
     public final static <T> Observable<T> empty() {
-        return from(Collections.<T>emptyList());
+        return (Observable<T>)EMPTY;
     }
 
     /**
@@ -2540,7 +2547,7 @@ public class Observable<T> {
     }
 
     /**
-     * Constructs an Observable that creates a dependent resource object.
+     * Constructs an Observable that creates a dependent resource object which is disposed of on unsubscription.
      * <p>
      * <img width="640" height="400" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/using.png" alt="">
      * <dl>
@@ -2561,7 +2568,44 @@ public class Observable<T> {
             final Func0<Resource> resourceFactory,
             final Func1<? super Resource, ? extends Observable<? extends T>> observableFactory,
             final Action1<? super Resource> disposeAction) {
-        return create(new OnSubscribeUsing<T, Resource>(resourceFactory, observableFactory, disposeAction));
+        return using(resourceFactory, observableFactory, disposeAction, false);
+    }
+    
+    /**
+     * Constructs an Observable that creates a dependent resource object which is disposed of just before 
+     * termination if you have set {@code disposeEagerly} to {@code true} and unsubscription does not occur
+     * before termination. Otherwise resource disposal will occur on unsubscription.  Eager disposal is
+     * particularly appropriate for a synchronous Observable that resuses resources. {@code disposeAction} will
+     * only be called once per subscription.
+     * <p>
+     * <img width="640" height="400" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/using.png" alt="">
+     * <dl>
+     *  <dt><b>Scheduler:</b></dt>
+     *  <dd>{@code using} does not operate by default on a particular {@link Scheduler}.</dd>
+     * </dl>
+     * 
+     * @warn "Backpressure Support" section missing from javadoc
+     * @param resourceFactory
+     *            the factory function to create a resource object that depends on the Observable
+     * @param observableFactory
+     *            the factory function to create an Observable
+     * @param disposeAction
+     *            the function that will dispose of the resource
+     * @param disposeEagerly
+     *            if {@code true} then disposal will happen either on unsubscription or just before emission of 
+     *            a terminal event ({@code onComplete} or {@code onError}).
+     * @return the Observable whose lifetime controls the lifetime of the dependent resource object
+     * @see <a href="http://reactivex.io/documentation/operators/using.html">ReactiveX operators documentation: Using</a>
+     * @Experimental The behavior of this can change at any time.
+     * @since (if this graduates from Experimental/Beta to supported, replace
+     *        this parenthetical with the release number)
+     */
+    @Experimental
+    public final static <T, Resource> Observable<T> using(
+            final Func0<Resource> resourceFactory,
+            final Func1<? super Resource, ? extends Observable<? extends T>> observableFactory,
+            final Action1<? super Resource> disposeAction, boolean disposeEagerly) {
+        return create(new OnSubscribeUsing<T, Resource>(resourceFactory, observableFactory, disposeAction, disposeEagerly));
     }
 
     /**
@@ -3749,6 +3793,26 @@ public class Observable<T> {
     }
 
     /**
+     * Returns an Observable that emits the items emitted by the source Observable or the items of an alternate
+     * Observable if the source Observable is empty.
+     * <p/>
+     * <dl>
+     *  <dt><b>Scheduler:</b></dt>
+     *  <dd>{@code switchIfEmpty} does not operate by default on a particular {@link Scheduler}.</dd>
+     * </dl>
+     *
+     * @param alternate
+     *              the alternate Observable to subscribe to if the source does not emit any items
+     * @return  an Observable that emits the items emitted by the source Observable or the items of an
+     *          alternate Observable if the source Observable is empty.
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     */
+    @Experimental
+    public final Observable<T> switchIfEmpty(Observable<? extends T> alternate) {
+        return lift(new OperatorSwitchIfEmpty<T>(alternate));
+    }
+
+    /**
      * Returns an Observable that delays the subscription to and emissions from the souce Observable via another
      * Observable on a per-item basis.
      * <p>
@@ -4489,7 +4553,35 @@ public class Observable<T> {
     public final <R> Observable<R> flatMap(Func1<? super T, ? extends Observable<? extends R>> func) {
         return merge(map(func));
     }
-    
+
+    /**
+     * Returns an Observable that emits items based on applying a function that you supply to each item emitted
+     * by the source Observable, where that function returns an Observable, and then merging those resulting
+     * Observables and emitting the results of this merger, while limiting the maximum number of concurrent
+     * subscriptions to these Observables.
+     * <p>
+     * <!-- <img width="640" height="310" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/flatMap.png" alt=""> -->
+     * <dl>
+     *  <dt><b>Scheduler:</b></dt>
+     *  <dd>{@code flatMap} does not operate by default on a particular {@link Scheduler}.</dd>
+     * </dl>
+     * 
+     * @param func
+     *            a function that, when applied to an item emitted by the source Observable, returns an
+     *            Observable
+     * @param maxConcurrent
+     *         the maximum number of Observables that may be subscribed to concurrently
+     * @return an Observable that emits the result of applying the transformation function to each item emitted
+     *         by the source Observable and merging the results of the Observables obtained from this
+     *         transformation
+     * @see <a href="http://reactivex.io/documentation/operators/flatmap.html">ReactiveX operators documentation: FlatMap</a>
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     */
+    @Beta
+    public final <R> Observable<R> flatMap(Func1<? super T, ? extends Observable<? extends R>> func, int maxConcurrent) {
+        return merge(map(func), maxConcurrent);
+    }
+
     /**
      * Returns an Observable that applies a function to each item emitted or notification raised by the source
      * Observable and then flattens the Observables returned from these functions and emits the resulting items.
@@ -4520,6 +4612,41 @@ public class Observable<T> {
             Func0<? extends Observable<? extends R>> onCompleted) {
         return merge(mapNotification(onNext, onError, onCompleted));
     }
+    /**
+     * Returns an Observable that applies a function to each item emitted or notification raised by the source
+     * Observable and then flattens the Observables returned from these functions and emits the resulting items, 
+     * while limiting the maximum number of concurrent subscriptions to these Observables.
+     * <p>
+     * <!-- <img width="640" height="410" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/mergeMap.nce.png" alt=""> -->
+     * <dl>
+     *  <dt><b>Scheduler:</b></dt>
+     *  <dd>{@code flatMap} does not operate by default on a particular {@link Scheduler}.</dd>
+     * </dl>
+     * 
+     * @param <R>
+     *            the result type
+     * @param onNext
+     *            a function that returns an Observable to merge for each item emitted by the source Observable
+     * @param onError
+     *            a function that returns an Observable to merge for an onError notification from the source
+     *            Observable
+     * @param onCompleted
+     *            a function that returns an Observable to merge for an onCompleted notification from the source
+     *            Observable
+     * @param maxConcurrent
+     *         the maximum number of Observables that may be subscribed to concurrently
+     * @return an Observable that emits the results of merging the Observables returned from applying the
+     *         specified functions to the emissions and notifications of the source Observable
+     * @see <a href="http://reactivex.io/documentation/operators/flatmap.html">ReactiveX operators documentation: FlatMap</a>
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     */
+    @Beta
+    public final <R> Observable<R> flatMap(
+            Func1<? super T, ? extends Observable<? extends R>> onNext,
+            Func1<? super Throwable, ? extends Observable<? extends R>> onError,
+            Func0<? extends Observable<? extends R>> onCompleted, int maxConcurrent) {
+        return merge(mapNotification(onNext, onError, onCompleted), maxConcurrent);
+    }
 
     /**
      * Returns an Observable that emits the results of a specified function to the pair of values emitted by the
@@ -4547,6 +4674,38 @@ public class Observable<T> {
     public final <U, R> Observable<R> flatMap(final Func1<? super T, ? extends Observable<? extends U>> collectionSelector,
             final Func2<? super T, ? super U, ? extends R> resultSelector) {
         return merge(lift(new OperatorMapPair<T, U, R>(collectionSelector, resultSelector)));
+    }
+    /**
+     * Returns an Observable that emits the results of a specified function to the pair of values emitted by the
+     * source Observable and a specified collection Observable, while limiting the maximum number of concurrent
+     * subscriptions to these Observables.
+     * <p>
+     * <!-- <img width="640" height="390" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/mergeMap.r.png" alt=""> -->
+     * <dl>
+     *  <dt><b>Scheduler:</b></dt>
+     *  <dd>{@code flatMap} does not operate by default on a particular {@link Scheduler}.</dd>
+     * </dl>
+     * 
+     * @param <U>
+     *            the type of items emitted by the collection Observable
+     * @param <R>
+     *            the type of items emitted by the resulting Observable
+     * @param collectionSelector
+     *            a function that returns an Observable for each item emitted by the source Observable
+     * @param resultSelector
+     *            a function that combines one item emitted by each of the source and collection Observables and
+     *            returns an item to be emitted by the resulting Observable
+     * @param maxConcurrent
+     *         the maximum number of Observables that may be subscribed to concurrently
+     * @return an Observable that emits the results of applying a function to a pair of values emitted by the
+     *         source Observable and the collection Observable
+     * @see <a href="http://reactivex.io/documentation/operators/flatmap.html">ReactiveX operators documentation: FlatMap</a>
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     */
+    @Beta
+    public final <U, R> Observable<R> flatMap(final Func1<? super T, ? extends Observable<? extends U>> collectionSelector,
+            final Func2<? super T, ? super U, ? extends R> resultSelector, int maxConcurrent) {
+        return merge(lift(new OperatorMapPair<T, U, R>(collectionSelector, resultSelector)), maxConcurrent);
     }
 
     /**
@@ -5016,6 +5175,9 @@ public class Observable<T> {
      * @see #subscribeOn
      */
     public final Observable<T> observeOn(Scheduler scheduler) {
+        if (this instanceof ScalarSynchronousObservable) {
+            return ((ScalarSynchronousObservable<T>)this).scalarScheduleOn(scheduler);
+        }
         return lift(new OperatorObserveOn<T>(scheduler));
     }
 
@@ -7262,6 +7424,9 @@ public class Observable<T> {
      * @see <a href="http://reactivex.io/documentation/operators/subscribe.html">ReactiveX operators documentation: Subscribe</a>
      */
     public final Subscription subscribe(final Observer<? super T> observer) {
+        if (observer instanceof Subscriber) {
+            return subscribe((Subscriber<? super T>)observer);
+        }
         return subscribe(new Subscriber<T>() {
 
             @Override
@@ -7435,6 +7600,9 @@ public class Observable<T> {
      * @see #observeOn
      */
     public final Observable<T> subscribeOn(Scheduler scheduler) {
+        if (this instanceof ScalarSynchronousObservable) {
+            return ((ScalarSynchronousObservable<T>)this).scalarScheduleOn(scheduler);
+        }
         return nest().lift(new OperatorSubscribeOn<T>(scheduler));
     }
 
@@ -7829,11 +7997,35 @@ public class Observable<T> {
      * @return an Observable that emits the items from the source Observable so long as each item satisfies the
      *         condition defined by {@code predicate}, then completes
      * @see <a href="http://reactivex.io/documentation/operators/takewhile.html">ReactiveX operators documentation: TakeWhile</a>
+     * @see Observable#takeUntil(Func1)
      */
     public final Observable<T> takeWhile(final Func1<? super T, Boolean> predicate) {
         return lift(new OperatorTakeWhile<T>(predicate));
     }
 
+    /**
+     * Returns an Observable that emits items emitted by the source Observable, checks the specified predicate
+     * for each item, and then completes if the condition is satisfied.
+     * <p>
+     * <img width="640" height="305" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/takeUntil.p.png" alt="">
+     * <p>
+     * The difference between this operator and {@link #takeWhile(Func1)} is that here, the condition is
+     * evaluated <em>after</em> the item is emitted.
+     * 
+     * @warn "Scheduler" and "Backpressure Support" sections missing from javadocs
+     * @param stopPredicate 
+     *            a function that evaluates an item emitted by the source Observable and returns a Boolean
+     * @return an Observable that first emits items emitted by the source Observable, checks the specified
+     *         condition after each item, and then completes if the condition is satisfied.
+     * @see <a href="http://reactivex.io/documentation/operators/takeuntil.html">ReactiveX operators documentation: TakeUntil</a>
+     * @see Observable#takeWhile(Func1)
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     */
+    @Experimental
+    public final Observable<T> takeUntil(final Func1<? super T, Boolean> stopPredicate) {
+        return lift(new OperatorTakeUntilPredicate<T>(stopPredicate));
+    }
+    
     /**
      * Returns an Observable that emits only the first item emitted by the source Observable during sequential
      * time windows of a specified duration.
@@ -8620,6 +8812,31 @@ public class Observable<T> {
         return lift(new OperatorUnsubscribeOn<T>(scheduler));
     }
 
+    /**
+     * Merges the specified Observable into this Observable sequence by using the {@code resultSelector}
+     * function only when the source Observable (this instance) emits an item.
+     * <p>
+     * <img width="640" height="380" src="https://raw.github.com/wiki/ReactiveX/RxJava/images/rx-operators/withLatestFrom.png" alt="">
+     *
+     * @warn "Backpressure Support" section missing from javadoc
+     * @warn "Scheduler" section missing from javadoc
+     * @param other
+     *            the other Observable
+     * @param resultSelector
+     *            the function to call when this Observable emits an item and the other Observable has already
+     *            emitted an item, to generate the item to be emitted by the resulting Observable
+     * @return an Observable that merges the specified Observable into this Observable by using the
+     *         {@code resultSelector} function only when the source Observable sequence (this instance) emits an
+     *         item
+     * @Experimental The behavior of this can change at any time.
+     * @since (if this graduates from Experimental/Beta to supported, replace this parenthetical with the release number)
+     * @see <a href="http://reactivex.io/documentation/operators/combinelatest.html">ReactiveX operators documentation: CombineLatest</a>
+     */
+    @Experimental
+    public final <U, R> Observable<R> withLatestFrom(Observable<? extends U> other, Func2<? super T, ? super U, ? extends R> resultSelector) {
+        return lift(new OperatorWithLatestFrom<T, U, R>(other, resultSelector));
+    }
+    
     /**
      * Returns an Observable that emits windows of items it collects from the source Observable. The resulting
      * Observable emits connected, non-overlapping windows. It emits the current window and opens a new one
