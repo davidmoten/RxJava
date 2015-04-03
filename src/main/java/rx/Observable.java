@@ -96,9 +96,9 @@ public class Observable<T> {
     }
 
     /**
-     * Invoked when Obserable.subscribe is called.
+     * Invoked when Observable.subscribe is called.
      */
-    public static interface OnSubscribe<T> extends Action1<Subscriber<? super T>> {
+    public interface OnSubscribe<T> extends Action1<Subscriber<? super T>> {
         // cover for generics insanity
     }
 
@@ -191,7 +191,7 @@ public class Observable<T> {
      * Transformer function used by {@link #compose}.
      * @warn more complete description needed
      */
-    public static interface Transformer<T, R> extends Func1<Observable<T>, Observable<R>> {
+    public interface Transformer<T, R> extends Func1<Observable<T>, Observable<R>> {
         // cover for generics insanity
     }
     
@@ -5610,7 +5610,7 @@ public class Observable<T> {
      * </dl>
      * 
      * @return an Observable that emits the items emitted by the source Observable repeatedly and in sequence
-     * @see <a href="http://reactivex.io/documentation/operators/repeat.html">ReactiveX operators documentation: Repeahttp://reactivex.io/documentation/operators/create.htmlt</a>
+     * @see <a href="http://reactivex.io/documentation/operators/repeat.html">ReactiveX operators documentation: Repeat</a>
      */
     public final Observable<T> repeat() {
         return OnSubscribeRedo.<T>repeat(this);
