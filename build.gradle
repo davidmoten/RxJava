@@ -7,6 +7,7 @@ description = 'RxJava: Reactive Extensions for the JVM – a library for composi
 
 apply plugin: 'rxjava-project'
 apply plugin: 'java'
+apply plugin: 'jacoco'
 
 dependencies {
     testCompile 'junit:junit-dep:4.10'
@@ -15,6 +16,27 @@ dependencies {
 
 javadoc {
     exclude "**/rx/internal/**"
+}
+
+jacoco {
+    toolVersion = "0.7.1.201405082137"
+}
+
+
+jacocoTestReport {
+    reports {
+        xml.enabled false
+        csv.enabled false
+        html.destination "${buildDir}/jacocoHtml"
+    }
+}
+
+test {
+    jacoco {
+        append = false
+        destinationFile = file("$buildDir/jacoco/jacocoTest.exec")
+        classDumpFile = file("$buildDir/jacoco/classpathdumps")
+    }
 }
 
 // support for snapshot/final releases with the various branches RxJava uses
@@ -29,4 +51,18 @@ if (project.hasProperty('release.useLastTag')) {
 
 test{
      maxHeapSize = "2g"
+}
+
+import org.ajoberstar.gradle.jacoco.tasks.*
+
+task jacocoRootReport(type: org.gradle.testing.jacoco.tasks.JacocoReport) {
+    dependsOn = subprojects.test
+    sourceDirectories = files(subprojects.sourceSets.main.allSource.srcDirs)
+    classDirectories =  files(subprojects.sourceSets.main.output)
+    executionData = files(subprojects.jacocoTestReport.executionData)
+    reports {
+        html.enabled = true
+        xml.enabled = true
+        csv.enabled = false
+    }
 }
