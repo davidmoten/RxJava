@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -119,6 +120,7 @@ public class OperatorSerializeTest {
     }
 
     @Test
+    @Ignore
     public void testMultiThreadedWithNPEinMiddle() {
         TestMultiThreadedObservable onSubscribe = new TestMultiThreadedObservable("one", "two", "three", null, "four", "five", "six", "seven", "eight", "nine");
         Observable<String> w = Observable.create(onSubscribe);
