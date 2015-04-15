@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.mockito.*;
 
@@ -707,6 +708,7 @@ public class OperatorRetryTest {
     }
     
     @Test(timeout = 15000)
+    @Ignore
     public void testRetryWithBackpressureParallel() throws InterruptedException {
         final int NUM_RETRIES = RxRingBuffer.SIZE * 2;
         int ncpu = Runtime.getRuntime().availableProcessors();

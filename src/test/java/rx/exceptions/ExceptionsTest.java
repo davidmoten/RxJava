@@ -39,27 +39,11 @@ public class ExceptionsTest {
         });
     }
 
-    @Test(expected = StackOverflowError.class)
+    @Test(expected = StackOverflowError.class, timeout = 10000)
     public void testStackOverflowIsThrown() {
         final PublishSubject<Integer> a = PublishSubject.create();
         final PublishSubject<Integer> b = PublishSubject.create();
-        new Observer<Integer>() {
-
-            @Override
-            public void onCompleted() {
-
-            }
-
-            @Override
-            public void onError(Throwable e) {
-                e.printStackTrace();
-            }
-
-            @Override
-            public void onNext(Integer args) {
-                System.out.println(args);
-            }
-        };
+        
         a.subscribe(new Observer<Integer>() {
 
             @Override
@@ -143,22 +127,23 @@ public class ExceptionsTest {
     @Test
     public void testOnErrorExceptionIsThrown() {
         try {
-            Observable.error(new IllegalArgumentException("original exception")).subscribe(new Observer<Object>() {
-                @Override
-                public void onCompleted() {
+            Observable.error(new IllegalArgumentException("original exception")).subscribe(
+                    new Observer<Object>() {
+                        @Override
+                        public void onCompleted() {
 
-                }
+                        }
 
-                @Override
-                public void onError(Throwable e) {
-                    throw new IllegalStateException("This should be thrown");
-                }
+                        @Override
+                        public void onError(Throwable e) {
+                            throw new IllegalStateException("This should be thrown");
+                        }
 
-                @Override
-                public void onNext(Object o) {
+                        @Override
+                        public void onNext(Object o) {
 
-                }
-            });
+                        }
+                    });
             fail("expecting an exception to be thrown");
         } catch (CompositeException t) {
             assertTrue(t.getExceptions().get(0) instanceof IllegalArgumentException);
