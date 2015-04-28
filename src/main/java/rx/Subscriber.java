@@ -33,7 +33,7 @@ import rx.internal.util.SubscriptionList;
 public abstract class Subscriber<T> implements Observer<T>, Subscription {
     
     /**
-     * Used just in this class to indicate an unspecified number of requests.
+     * Used internally only to indicate an unspecified number of requests.
      */
     private static final long NOT_SET = Long.MIN_VALUE;
 
@@ -45,13 +45,14 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
     /**
      * If present this subscriber is used TODO  
      */
-    private final Subscriber<?> subscriber;
+    private final Subscriber<?> producingSubscriber;
     
     /**
      * If present this is used TODO 
      */
     /* protected by `this` */
     private Producer producer;
+    
     /* protected by `this` */
     private long requested = NOT_SET; // default to not set
 
@@ -65,10 +66,10 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
     /**
      * TODO
      * 
-     * @param subscriber
+     * @param producingSubscriber
      */
-    protected Subscriber(Subscriber<?> subscriber) {
-        this(subscriber, true);
+    protected Subscriber(Subscriber<?> producingSubscriber) {
+        this(producingSubscriber, true);
     }
 
     /**
@@ -77,15 +78,15 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
      * <p>
      * To retain the chaining of subscribers, add the created instance to {@code subscriber} via {@link #add}.
      * 
-     * @param subscriber
-     *            the other Subscriber
+     * @param producingSubscriber
+     *            the subscriber that will be delegated the setProducer call
      * @param shareSubscriptions
      *            {@code true} to share the subscription list in {@code subscriber} with this instance
      * @since 1.0.6
      */
-    protected Subscriber(Subscriber<?> subscriber, boolean shareSubscriptions) {
-        this.subscriber = subscriber;
-        this.subscriptions = shareSubscriptions && subscriber != null ? subscriber.subscriptions : new SubscriptionList();
+    protected Subscriber(Subscriber<?> producingSubscriber, boolean shareSubscriptions) {
+        this.producingSubscriber = producingSubscriber;
+        this.subscriptions = shareSubscriptions && producingSubscriber != null ? producingSubscriber.subscriptions : new SubscriptionList();
     }
 
     /**
@@ -148,12 +149,20 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
         if (n < 0) {
             throw new IllegalArgumentException("number requested cannot be negative: " + n);
         } 
+        // this weird bit of code below exists so that the request values and the producer 
+        // to use are read safely (taking into account concurrent calls to this method or to setProducer) 
+        // and then producer.request() called with no lock (the monitor of this)
+        
         Producer producerToRequestFrom = null;
         synchronized (this) {
-            // note that producer is null only before onStart is called
+            // if this method called by onStart then producer would not normallly have been set.
+            // the onSubscribe method may call setProducer for a source that supports 
+            // backpressure
             if (producer != null) {
                 producerToRequestFrom = producer;
-            } else if (requested == NOT_SET) {
+            } 
+            // else update the number requested
+            else if (requested == NOT_SET) {
                 requested = n;
             } else { 
                 final long total = requested + n;
@@ -165,7 +174,8 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
                 }
             }
         }
-        // after releasing lock
+        // must release monitor because calling request(n) (which may then call onNext, etc) 
+        // is not allowed (TODO explain why exactly)
         if (producerToRequestFrom != null) {
             producerToRequestFrom.request(n);
         }
@@ -184,7 +194,7 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
         synchronized (this) {
             toRequest = requested;
             producer = p;
-            if (subscriber != null) {
+            if (producingSubscriber != null) {
                 // middle operator ... we pass thru unless a request has been made
                 if (toRequest == NOT_SET) {
                     // we pass-thru to the next producer as nothing has been requested
@@ -195,7 +205,7 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
         }
         // do after releasing lock
         if (setProducer) {
-            subscriber.setProducer(producer);
+            producingSubscriber.setProducer(producer);
         } else {
             // we execute the request with whatever has been requested (or Long.MAX_VALUE)
             if (toRequest == NOT_SET) {
