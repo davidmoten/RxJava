@@ -191,19 +191,22 @@ public abstract class Subscriber<T> implements Observer<T>, Subscription {
     public void setProducer(Producer p) {
         long toRequest;
         boolean setProducer = false;
+        
+        // safely read requested and producingSubscriber and decide if we
+        // delegate requests to producingSubscriber or use the supplied producer p
         synchronized (this) {
             toRequest = requested;
             producer = p;
             if (producingSubscriber != null) {
                 // middle operator ... we pass thru unless a request has been made
                 if (toRequest == NOT_SET) {
-                    // we pass-thru to the next producer as nothing has been requested
+                    // we delegate to the next producer as nothing has been requested
                     setProducer = true;
                 }
-
             }
         }
-        // do after releasing lock
+        // we must release the monitor of this before calling request() or setProducer()
+        // because TODO
         if (setProducer) {
             producingSubscriber.setProducer(producer);
         } else {
