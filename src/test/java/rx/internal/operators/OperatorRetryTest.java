@@ -396,7 +396,7 @@ public class OperatorRetryTest {
             o.setProducer(new Producer() {
                 final AtomicLong req = new AtomicLong();
                 @Override
-                public void request(long n) {
+                public synchronized void request(long n) {
                     if (n == Long.MAX_VALUE) {
                         o.onNext("beginningEveryTime");
                         int i = count.getAndIncrement();
