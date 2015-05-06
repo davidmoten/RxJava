@@ -49,6 +49,7 @@ import rx.functions.Func1;
 import rx.functions.Func2;
 import rx.schedulers.Schedulers;
 import rx.subjects.PublishSubject;
+import rx.subjects.PublishSubjectSingleSubscriber;
 import rx.subscriptions.SerialSubscription;
 
 public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
@@ -201,7 +202,7 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
         final SerialSubscription sourceSubscriptions = new SerialSubscription();
         child.add(sourceSubscriptions);
 
-        final PublishSubject<Notification<?>> terminals = PublishSubject.create();
+        final PublishSubjectSingleSubscriber<Notification<?>> terminals = PublishSubjectSingleSubscriber.create();
 
         final Action0 subscribeToSource = new Action0() {
             @Override
