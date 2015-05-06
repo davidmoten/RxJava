@@ -47,6 +47,8 @@ import rx.Subscriber;
 import rx.functions.Action0;
 import rx.functions.Func1;
 import rx.functions.Func2;
+import rx.observers.SerializedObserver;
+import rx.observers.SerializedSubscriber;
 import rx.schedulers.Schedulers;
 import rx.subjects.PublishSubject;
 import rx.subjects.PublishSubjectSingleSubscriber;
@@ -204,7 +206,11 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
 
         final PublishSubjectSingleSubscriber<Notification<?>> terminals = PublishSubjectSingleSubscriber.create();
 
+        final SerializedObserver<Notification<?>> safeTerminals = new SerializedObserver<Notification<?>>(terminals);
+        
         final Action0 subscribeToSource = new Action0() {
+            
+            
             @Override
             public void call() {
                 if (child.isUnsubscribed()) {
@@ -219,7 +225,7 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
                             done = true;
                             currentProducer.set(null);
                             unsubscribe();
-                            terminals.onNext(Notification.createOnCompleted());
+                            safeTerminals.onNext(Notification.createOnCompleted());
                         }
                     }
 
@@ -229,7 +235,7 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
                             done = true;
                             currentProducer.set(null);
                             unsubscribe();
-                            terminals.onNext(Notification.createOnError(e));
+                            safeTerminals.onNext(Notification.createOnError(e));
                         }
                     }
 
