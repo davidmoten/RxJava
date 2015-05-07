@@ -308,6 +308,21 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
                     }
                 }));
 
+        child.setProducer(new Producer() {
+
+            @Override
+            public void request(final long n) {
+                BackpressureUtils.getAndAddRequest(consumerCapacity, n);
+                Producer producer = currentProducer.get();
+                if (producer != null) {
+                    producer.request(n);
+                } else
+                if (resumeBoundary.compareAndSet(true, false)) {
+                    worker.schedule(subscribeToSource);
+                }
+            }
+        });
+        
         // subscribe to the restarts observable to know when to schedule the next redo.
         worker.schedule(new Action0() {
             @Override
@@ -341,21 +356,5 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
                 });
             }
         });
-
-        child.setProducer(new Producer() {
-
-            @Override
-            public void request(final long n) {
-                long c = BackpressureUtils.getAndAddRequest(consumerCapacity, n);
-                Producer producer = currentProducer.get();
-                if (producer != null) {
-                    producer.request(n);
-                } else
-                if (resumeBoundary.compareAndSet(true, false)) {
-                    worker.schedule(subscribeToSource);
-                }
-            }
-        });
-        
     }
 }
