@@ -242,10 +242,15 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
                     @Override
                     public void onNext(T v) {
                         if (!done) {
-                            if (consumerCapacity.get() != Long.MAX_VALUE) {
-                                consumerCapacity.decrementAndGet();
-                            }
                             child.onNext(v);
+                            while (true) {
+                                long cc = consumerCapacity.get();
+                                if (cc == Long.MAX_VALUE)
+                                    break;
+                                else if (consumerCapacity.compareAndSet(cc, cc - 1))
+                                    break;
+                                //otherwise try again
+                            }
                         }
                     }
 
@@ -346,7 +351,7 @@ public final class OnSubscribeRedo<T> implements OnSubscribe<T> {
                 if (producer != null) {
                     producer.request(n);
                 } else
-                if (c == 0 && resumeBoundary.compareAndSet(true, false)) {
+                if (resumeBoundary.compareAndSet(true, false)) {
                     worker.schedule(subscribeToSource);
                 }
             }
