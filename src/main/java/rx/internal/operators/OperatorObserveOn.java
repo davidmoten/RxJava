@@ -180,11 +180,11 @@ public final class OperatorObserveOn<T> implements Operator<T, T> {
 
         // only execute this from schedule()
         void pollQueue() {
-            int emitted = 0;
-            do {
+            int emittedTotal = 0;
+            long r = requested;
+            while (true) {
                 counter = 1;
-                long produced = 0;
-                long r = requested;
+                long emitted = 0;
                 for (;;) {
                     if (child.isUnsubscribed())
                         return;
@@ -208,7 +208,6 @@ public final class OperatorObserveOn<T> implements Operator<T, T> {
                             child.onNext(on.getValue(o));
                             r--;
                             emitted++;
-                            produced++;
                         } else {
                             break;
                         }
@@ -216,12 +215,23 @@ public final class OperatorObserveOn<T> implements Operator<T, T> {
                         break;
                     }
                 }
-                if (produced > 0 && requested != Long.MAX_VALUE) {
-                    REQUESTED.addAndGet(this, -produced);
+                if (emitted > 0) {
+                    // interested in initial request being Long.MAX_VALUE rather than
+                    // accumulated requests reaching Long.MAX_VALUE so is fine just to 
+                    // to test the value of `r` instead of `requested`.
+                    if (r != Long.MAX_VALUE) {
+                        r = REQUESTED.addAndGet(this, -emitted);
+                    }
+                    emittedTotal+=emitted;
+                } else if (COUNTER_UPDATER.decrementAndGet(this) == 0) {
+                    break;
+                } else {
+                    // update r for the next time through the loop
+                    r = REQUESTED.get(this);
                 }
-            } while (COUNTER_UPDATER.decrementAndGet(this) > 0);
-            if (emitted > 0) {
-                request(emitted);
+            }
+            if (emittedTotal > 0) {
+                request(emittedTotal);
             }
         }
     }
