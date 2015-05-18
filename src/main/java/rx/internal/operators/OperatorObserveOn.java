@@ -222,7 +222,7 @@ public final class OperatorObserveOn<T> implements Operator<T, T> {
                     if (r != Long.MAX_VALUE) {
                         r = REQUESTED.addAndGet(this, -emitted);
                     }
-                    emittedTotal+=emitted;
+                    emittedTotal += emitted;
                 } else if (COUNTER_UPDATER.decrementAndGet(this) == 0) {
                     break;
                 } else {

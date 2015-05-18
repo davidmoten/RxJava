@@ -105,6 +105,10 @@ public abstract class InputWithIncrementingInteger {
     public LatchedObserver<Integer> newLatchedObserver() {
         return new LatchedObserver<Integer>(bh);
     }
+    
+    public LatchedBackpressureSubscriber<Integer> newLatchedBackpressureSubscriber() {
+        return new LatchedBackpressureSubscriber<Integer>(bh);
+    }
 
     public Subscriber<Integer> newSubscriber() {
         return new Subscriber<Integer>() {

@@ -26,6 +26,7 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.State;
 
 import rx.jmh.InputWithIncrementingInteger;
+import rx.jmh.LatchedBackpressureSubscriber;
 import rx.jmh.LatchedObserver;
 import rx.schedulers.Schedulers;
 
@@ -84,6 +85,48 @@ public class OperatorObserveOnPerf {
     @Benchmark
     public void observeOnImmediateSubscribedOnComputation(Input input) throws InterruptedException {
         LatchedObserver<Integer> o = input.newLatchedObserver();
+        input.observable.subscribeOn(Schedulers.computation()).observeOn(Schedulers.immediate()).subscribe(o);
+        o.latch.await();
+    }
+    
+    @Benchmark
+    public void observeOnComputationBackpressure(Input input) throws InterruptedException {
+        LatchedBackpressureSubscriber<Integer> o = input.newLatchedBackpressureSubscriber();
+        input.observable.observeOn(Schedulers.computation()).subscribe(o);
+        o.latch.await();
+    }
+
+    @Benchmark
+    public void observeOnNewThreadBackpressure(Input input) throws InterruptedException {
+        LatchedBackpressureSubscriber<Integer> o = input.newLatchedBackpressureSubscriber();
+        input.observable.observeOn(Schedulers.newThread()).subscribe(o);
+        o.latch.await();
+    }
+
+    @Benchmark
+    public void observeOnImmediateBackpressure(Input input) throws InterruptedException {
+        LatchedBackpressureSubscriber<Integer> o = input.newLatchedBackpressureSubscriber();
+        input.observable.observeOn(Schedulers.immediate()).subscribe(o);
+        o.latch.await();
+    }
+    
+    @Benchmark
+    public void observeOnComputationSubscribedOnComputationBackpressure(Input input) throws InterruptedException {
+        LatchedBackpressureSubscriber<Integer> o = input.newLatchedBackpressureSubscriber();
+        input.observable.subscribeOn(Schedulers.computation()).observeOn(Schedulers.computation()).subscribe(o);
+        o.latch.await();
+    }
+
+    @Benchmark
+    public void observeOnNewThreadSubscribedOnComputationBackpressure(Input input) throws InterruptedException {
+        LatchedBackpressureSubscriber<Integer> o = input.newLatchedBackpressureSubscriber();
+        input.observable.subscribeOn(Schedulers.computation()).observeOn(Schedulers.newThread()).subscribe(o);
+        o.latch.await();
+    }
+
+    @Benchmark
+    public void observeOnImmediateSubscribedOnComputationBackpressure(Input input) throws InterruptedException {
+        LatchedBackpressureSubscriber<Integer> o = input.newLatchedBackpressureSubscriber();
         input.observable.subscribeOn(Schedulers.computation()).observeOn(Schedulers.immediate()).subscribe(o);
         o.latch.await();
     }
