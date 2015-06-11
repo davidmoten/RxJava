@@ -65,32 +65,33 @@ public class OperatorDefaultIfEmpty<T> implements Operator<T, T> {
             this.defaultValue = defaultValue;
         }
 
-        public void requestMore(long n) {
-            if (n > 0) {
-                drain(n);
-            }
+        @Override
+        public void onStart() {
+            // do nothing
         }
 
-        private void drain(long n) {
-            // n == 0 when called by onComplete
-            boolean isPositive = n>0;
-            while (true) {
-                int s = state.get();
-                if (s == NOT_REQUESTED && isPositive) {
-                    if (state.compareAndSet(NOT_REQUESTED, REQUESTED)) {
-                        break;
-                    }
-                } else if (s == EMPTY_NOT_REQUESTED) {
-                    if (state.compareAndSet(EMPTY_NOT_REQUESTED, EMPTY_REQUESTED)) {
-                        emitDefaultValue();
+        public void requestMore(long n) {
+            if (n > 0) {
+                while (true) {
+                    int s = state.get();
+                    if (s == NOT_REQUESTED) {
+                        if (state.compareAndSet(NOT_REQUESTED, REQUESTED)) {
+                            request(n);
+                            return;
+                        }
+                    } else if (s == EMPTY_NOT_REQUESTED) {
+                        if (state.compareAndSet(EMPTY_NOT_REQUESTED, EMPTY_REQUESTED)) {
+                            emitDefaultValue();
+                            return;
+                        }
+                    } else if (s == DONE) {
+                        return;
+                    } else if (s == HAS_VALUE || s == REQUESTED) {
+                        request(n);
                         return;
                     }
-                } else if (s == DONE) {
-                    return;
-                } else if (s == HAS_VALUE)
-                    break;
+                }
             }
-            request(n);
         }
 
         @Override
@@ -106,8 +107,24 @@ public class OperatorDefaultIfEmpty<T> implements Operator<T, T> {
 
         @Override
         public void onCompleted() {
-            
-            drain(0);
+            if (state.get() == HAS_VALUE) {
+                child.onCompleted();
+            } else {
+                while (true) {
+                    int s = state.get();
+                    if (s == NOT_REQUESTED) {
+                        if (state.compareAndSet(NOT_REQUESTED, EMPTY_NOT_REQUESTED)) {
+                            return;
+                        }
+                    } else if (s == REQUESTED) {
+                        if (state.compareAndSet(REQUESTED, EMPTY_REQUESTED)) {
+                            emitDefaultValue();
+                            return;
+                        }
+                    } else
+                        return;
+                }
+            }
         }
 
         private void emitDefaultValue() {
