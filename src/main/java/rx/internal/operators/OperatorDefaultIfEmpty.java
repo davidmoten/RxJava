@@ -15,13 +15,18 @@
  */
 package rx.internal.operators;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import rx.Observable.Operator;
+import rx.Producer;
 import rx.Subscriber;
 
 /**
  * Returns the elements of the specified sequence or the specified default value
  * in a singleton sequence if the sequence is empty.
- * @param <T> the value type
+ * 
+ * @param <T>
+ *            the value type
  */
 public class OperatorDefaultIfEmpty<T> implements Operator<T, T> {
     final T defaultValue;
@@ -29,36 +34,91 @@ public class OperatorDefaultIfEmpty<T> implements Operator<T, T> {
     public OperatorDefaultIfEmpty(T defaultValue) {
         this.defaultValue = defaultValue;
     }
-    
+
     @Override
     public Subscriber<? super T> call(final Subscriber<? super T> child) {
-        return new Subscriber<T>(child) {
-            boolean hasValue;
+        final ParentSubscriber<T> parent = new ParentSubscriber<T>(child, defaultValue);
+        child.add(parent);
+        child.setProducer(new Producer() {
             @Override
-            public void onNext(T t) {
-                hasValue = true;
-                child.onNext(t);
+            public void request(long n) {
+                parent.requestMore(n);
             }
+        });
+        return parent;
+    }
 
-            @Override
-            public void onError(Throwable e) {
-                child.onError(e);
+    private static class ParentSubscriber<T> extends Subscriber<T> {
+
+        private final Subscriber<? super T> child;
+        private final T defaultValue;
+        private static final int REQUESTED = 0;
+        private static final int NOT_REQUESTED = 1;
+        private static final int DONE = 2;
+        private static final int EMPTY_NOT_REQUESTED = 3;
+        private static final int EMPTY_REQUESTED = 4;
+        private static final int HAS_VALUE = 5;
+        private final AtomicInteger state = new AtomicInteger(NOT_REQUESTED);
+
+        ParentSubscriber(Subscriber<? super T> child, T defaultValue) {
+            this.child = child;
+            this.defaultValue = defaultValue;
+        }
+
+        public void requestMore(long n) {
+            if (n > 0) {
+                drain(n);
             }
+        }
 
-            @Override
-            public void onCompleted() {
-                if (!hasValue) {
-                    try {
-                        child.onNext(defaultValue);
-                    } catch (Throwable e) {
-                        child.onError(e);
+        private void drain(long n) {
+            // n == 0 when called by onComplete
+            boolean isPositive = n>0;
+            while (true) {
+                int s = state.get();
+                if (s == NOT_REQUESTED && isPositive) {
+                    if (state.compareAndSet(NOT_REQUESTED, REQUESTED)) {
+                        break;
+                    }
+                } else if (s == EMPTY_NOT_REQUESTED) {
+                    if (state.compareAndSet(EMPTY_NOT_REQUESTED, EMPTY_REQUESTED)) {
+                        emitDefaultValue();
                         return;
                     }
-                }
-                child.onCompleted();
+                } else if (s == DONE) {
+                    return;
+                } else if (s == HAS_VALUE)
+                    break;
             }
+            request(n);
+        }
+
+        @Override
+        public void onNext(T t) {
+            state.set(HAS_VALUE);
+            child.onNext(t);
+        }
+
+        @Override
+        public void onError(Throwable e) {
+            child.onError(e);
+        }
+
+        @Override
+        public void onCompleted() {
             
-        };
+            drain(0);
+        }
+
+        private void emitDefaultValue() {
+            try {
+                child.onNext(defaultValue);
+            } catch (Throwable e) {
+                child.onError(e);
+                return;
+            }
+            child.onCompleted();
+        }
     }
-    
+
 }

@@ -26,6 +26,7 @@ import rx.Observable;
 import rx.Observer;
 import rx.Subscriber;
 import rx.exceptions.TestException;
+import rx.observers.TestSubscriber;
 
 public class OperatorDefaultIfEmptyTest {
 
@@ -84,5 +85,23 @@ public class OperatorDefaultIfEmptyTest {
         verify(o).onError(any(TestException.class));
         verify(o, never()).onNext(any(Integer.class));
         verify(o, never()).onCompleted();
+    }
+    
+    @Test
+    public void testBackpressureWhenNonEmpty() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(0);
+        Observable.just(1, 2, 3).defaultIfEmpty(4).subscribe(ts);
+        ts.assertValueCount(0);
+        ts.requestMore(1);
+        ts.assertValueCount(1);
+    }
+    
+    @Test
+    public void testBackpressureWhenEmpty() {
+        TestSubscriber<Integer> ts = new TestSubscriber<Integer>(0);
+        Observable.<Integer>empty().defaultIfEmpty(4).subscribe(ts);
+        ts.assertValueCount(0);
+        ts.requestMore(1);
+        ts.assertValueCount(1);
     }
 }
