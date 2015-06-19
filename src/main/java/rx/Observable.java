@@ -1696,7 +1696,7 @@ public class Observable<T> {
     public final static <T> Observable<T> merge(Observable<? extends Observable<? extends T>> source) {
         return source.lift(OperatorMerge.<T>instance(false));
     }
-
+    
     /**
      * Flattens an Observable that emits Observables into a single Observable that emits the items emitted by
      * those Observables, without any transformation, while limiting the maximum number of concurrent
@@ -5224,8 +5224,15 @@ public class Observable<T> {
      * @return an Observable that emits all of the items emitted by the source Observables
      * @see <a href="http://reactivex.io/documentation/operators/merge.html">ReactiveX operators documentation: Merge</a>
      */
-    public final Observable<T> mergeWith(Observable<? extends T> t1) {
-        return merge(this, t1);
+    @SuppressWarnings("unchecked")
+    public final Observable<T> mergeWith(Observable<? extends T> other) {
+        if (this == empty()) {
+            return (Observable<T>) other;
+        } else if (other == empty()) {
+            return this;
+        } else { 
+            return merge(this, other);
+        }
     }
     
     /**
