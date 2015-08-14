@@ -23,6 +23,7 @@ import rx.Observable.OnSubscribe;
 import rx.exceptions.CompositeException;
 import rx.functions.*;
 import rx.observers.Subscribers;
+import rx.plugins.RxJavaPlugins;
 
 /**
  * Constructs an observable sequence that depends on a resource object.
@@ -114,6 +115,12 @@ public final class OnSubscribeUsing<T, Resource> implements OnSubscribe<T> {
             if (compareAndSet(false, true)) {
                 try {
                     dispose.call(resource);
+                } catch (Throwable t) {
+                    try {
+                        RxJavaPlugins.getInstance().getErrorHandler().handleError(t);
+                    } catch (Throwable pluginException) {
+                        pluginException.printStackTrace();
+                    }  
                 } finally {
                     resource = null;
                     dispose = null;

@@ -23,10 +23,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.mockito.InOrder;
 
@@ -40,6 +44,10 @@ import rx.functions.Action0;
 import rx.functions.Action1;
 import rx.functions.Func0;
 import rx.functions.Func1;
+import rx.observers.SafeSubscriber;
+import rx.observers.TestSubscriber;
+import rx.plugins.RxJavaErrorHandler;
+import rx.plugins.RxJavaPlugins;
 import rx.subscriptions.Subscriptions;
 
 public class OnSubscribeUsingTest {
@@ -58,6 +66,15 @@ public class OnSubscribeUsingTest {
         }
 
     }
+    
+    private static class ThrowingDisposeAction implements Action1<Resource> {
+
+        @Override
+        public void call(Resource r) {
+            throw new RuntimeException();
+        }
+
+    }
 
     private final Action1<Subscription> disposeSubscription = new Action1<Subscription>() {
 
@@ -67,6 +84,20 @@ public class OnSubscribeUsingTest {
         }
 
     };
+    
+    @Before
+    @After
+    public void resetBefore() {
+        RxJavaPlugins ps = RxJavaPlugins.getInstance();
+        
+        try {
+            Method m = ps.getClass().getDeclaredMethod("reset");
+            m.setAccessible(true);
+            m.invoke(ps);
+        } catch (Throwable ex) {
+            ex.printStackTrace();
+        }
+    }
 
     @Test
     public void testUsing() {
@@ -383,6 +414,39 @@ public class OnSubscribeUsingTest {
         observable.subscribe(observer);
 
         assertEquals(Arrays.asList("error", "unsub", "disposed"), events);
+    }
+    
+    @Test
+    public void testUsingDisposeActionThrowsRuntimeExceptionShouldBeReportedToRxJavaPluginErrorHandler() {
+        final AtomicInteger calls = new AtomicInteger();
+        RxJavaPlugins.getInstance().registerErrorHandler(new RxJavaErrorHandler() {
+            @Override
+            public void handleError(Throwable e) {
+                calls.incrementAndGet();
+            }
+        });
+        
+        final List<String> events = new ArrayList<String>();
+        Func0<Resource> resourceFactory = createResourceFactory(events);
+        final Action0 completion = createOnCompletedAction(events);
+        final Action0 unsub =createUnsubAction(events);
+
+        Func1<Resource, Observable<String>> observableFactory = new Func1<Resource, Observable<String>>() {
+            @Override
+            public Observable<String> call(Resource resource) {
+                return Observable.just("hello", "world");
+            }
+        };
+
+        TestSubscriber<String> ts = TestSubscriber.create(0);
+        Observable<String> observable = Observable.using(resourceFactory, observableFactory,
+                new ThrowingDisposeAction(), true).doOnUnsubscribe(unsub)
+                .doOnCompleted(completion);
+        observable.subscribe(ts);
+        ts.requestMore(1);
+        assertEquals(0, calls.get());
+        ts.unsubscribe();
+        assertEquals(1, calls.get());
     }
 
     private static Action0 createUnsubAction(final List<String> events) {
