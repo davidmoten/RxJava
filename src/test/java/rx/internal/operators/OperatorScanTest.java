@@ -391,4 +391,39 @@ public class OperatorScanTest {
         ts.assertNotCompleted();
         ts.assertValue(0);
     }
+    
+    @Test(timeout=1000000)
+    public void testScanDoesNotHang() {
+        Observable.range(0, Integer.MAX_VALUE)
+                //
+                .scan(1, new Func2<Integer, Integer, Integer>() {
+
+                    @Override
+                    public Integer call(Integer t1, Integer t2) {
+                        return t1;
+                    }
+                })
+                //
+                .subscribe(new Subscriber<Integer>() {
+
+                    int count = 0;
+
+                    @Override
+                    public void onCompleted() {
+
+                    }
+
+                    @Override
+                    public void onError(Throwable e) {
+
+                    }
+
+                    @Override
+                    public void onNext(Integer t) {
+                        count++;
+                        if (count == 2)
+                            unsubscribe();
+                    }
+                });
+    }
 }
