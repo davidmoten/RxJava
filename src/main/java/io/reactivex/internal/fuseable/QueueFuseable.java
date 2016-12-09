@@ -29,9 +29,9 @@ public interface QueueFuseable<T> extends SimpleQueue<T> {
      * Request a synchronous fusion mode and can be returned by {@link #requestFusion(int)}
      * for an accepted mode.
      * <p>
-     * In synchronous fusion, all upstream values are either already available or is generated
+     * In synchronous fusion, all upstream values are either already available or are generated
      * when {@link #poll()} is called synchronously. When the {@link #poll()} returns null,
-     * that is the indication if a terminated stream.
+     * that indicates a terminated stream.
      * In this mode, the upstream won't call the onXXX methods and callers of
      * {@link #poll()} should be prepared to catch exceptions. Note that {@link #poll()} has
      * to be called sequentially (from within a serializing drain-loop).
