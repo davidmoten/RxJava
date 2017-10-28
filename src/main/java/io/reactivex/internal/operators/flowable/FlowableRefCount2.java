@@ -24,7 +24,8 @@ import io.reactivex.functions.Consumer;
 import io.reactivex.internal.fuseable.SimplePlainQueue;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 
-public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T> {
+public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T>
+        implements Consumer<Disposable> {
 
     private final SimplePlainQueue<Subscriber<? super T>> queue;
     private final AtomicInteger wip = new AtomicInteger();
@@ -32,7 +33,7 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T> {
     // mutable
     private int subscriptionCount;
     private AtomicInteger cancelled = new AtomicInteger();
-    private ConnectDisposable connectDisposable;
+    private Disposable connectDisposable;
 
     public FlowableRefCount2(ConnectableFlowable<T> source) {
         super(source);
@@ -59,7 +60,7 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T> {
                     }
                     subscriptionCount++;
                     if (subscriptionCount == 1) {
-                        ((ConnectableFlowable<T>) super.source).connect(connectDisposable);
+                        ((ConnectableFlowable<T>) super.source).connect(this);
                     }
                     RefCountSubscriber subscriber = new RefCountSubscriber(s);
                     s.onSubscribe(subscriber);
@@ -81,27 +82,6 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T> {
             subscriptionCount = 0;
             cancelled.addAndGet(-c);
         }
-    }
-
-    static final class ConnectDisposable implements Disposable, Consumer<Disposable> {
-
-        private Disposable disposable;
-
-        @Override
-        public void accept(Disposable d) throws Exception {
-            this.disposable = d;
-        }
-
-        @Override
-        public void dispose() {
-            disposable.dispose();
-        }
-
-        @Override
-        public boolean isDisposed() {
-            return disposable.isDisposed();
-        }
-
     }
 
     final class RefCountSubscriber implements Subscriber<T>, Subscription {
@@ -145,5 +125,10 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T> {
             drain();
         }
 
+    }
+
+    @Override
+    public void accept(Disposable d) throws Exception {
+        connectDisposable = d;
     }
 }
