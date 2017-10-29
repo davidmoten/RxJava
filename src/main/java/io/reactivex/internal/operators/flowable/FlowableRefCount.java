@@ -74,7 +74,6 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                         ((ConnectableFlowable<T>) super.source).connect(this);
                     }
                     RefCountSubscriber subscriber = new RefCountSubscriber(s);
-                    s.onSubscribe(subscriber);
                     super.source.subscribe(subscriber);
                 }
                 if (wip.decrementAndGet() == 0) {
@@ -107,6 +106,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
         @Override
         public void onSubscribe(Subscription s) {
             this.parentSubscription = s;
+            child.onSubscribe(this);
         }
 
         @Override
