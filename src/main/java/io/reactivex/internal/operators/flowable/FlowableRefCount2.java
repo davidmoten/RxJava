@@ -52,6 +52,11 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T>
         drain();
     }
 
+    @Override
+    public void accept(Disposable d) throws Exception {
+        connectDisposable = d;
+    }
+
     private void drain() {
         if (wip.getAndIncrement() == 0) {
             while (true) {
@@ -81,7 +86,7 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T>
 
     private void checkToDisposeConnect() {
         int c = cancelled.get();
-        if (subscriptionCount - c == 0) {
+        if (subscriptionCount == c) {
             if (connectDisposable != null) {
                 connectDisposable.dispose();
             }
@@ -133,8 +138,4 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T>
 
     }
 
-    @Override
-    public void accept(Disposable d) throws Exception {
-        connectDisposable = d;
-    }
 }
