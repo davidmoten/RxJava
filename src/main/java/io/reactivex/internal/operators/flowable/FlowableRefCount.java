@@ -59,6 +59,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
 
     private void drain() {
         if (wip.getAndIncrement() == 0) {
+            int missed = 1;
             while (true) {
                 checkToDisposeConnect();
                 boolean firstTime = true;
@@ -69,14 +70,15 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                     } else {
                         firstTime = false;
                     }
+                    RefCountSubscriber subscriber = new RefCountSubscriber(s);
+                    super.source.subscribe(subscriber);
                     subscriptionCount++;
                     if (subscriptionCount == 1) {
                         ((ConnectableFlowable<T>) super.source).connect(this);
                     }
-                    RefCountSubscriber subscriber = new RefCountSubscriber(s);
-                    super.source.subscribe(subscriber);
                 }
-                if (wip.decrementAndGet() == 0) {
+                missed = wip.addAndGet(-missed);
+                if (missed == 0) {
                     return;
                 }
             }
@@ -85,7 +87,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
 
     private void checkToDisposeConnect() {
         int c = cancelled.get();
-        if (subscriptionCount == c) {
+        if (subscriptionCount == c && c != 0) {
             if (connectDisposable != null) {
                 connectDisposable.dispose();
             }
