@@ -13,218 +13,129 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.concurrent.atomic.*;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import org.reactivestreams.*;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
-import io.reactivex.FlowableSubscriber;
-import io.reactivex.disposables.*;
+import io.reactivex.disposables.Disposable;
 import io.reactivex.flowables.ConnectableFlowable;
 import io.reactivex.functions.Consumer;
-import io.reactivex.internal.subscriptions.SubscriptionHelper;
+import io.reactivex.internal.fuseable.SimplePlainQueue;
+import io.reactivex.internal.queue.MpscLinkedQueue;
 
-/**
- * Returns an observable sequence that stays connected to the source as long as
- * there is at least one subscription to the observable sequence.
- *
- * @param <T>
- *            the value type
- */
-public final class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
-    final ConnectableFlowable<T> source;
-    volatile CompositeDisposable baseDisposable = new CompositeDisposable();
-    final AtomicInteger subscriptionCount = new AtomicInteger();
+public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
+        implements Consumer<Disposable> {
 
-    /**
-     * Use this lock for every subscription and disconnect action.
-     */
-    final ReentrantLock lock = new ReentrantLock();
+    private final SimplePlainQueue<Subscriber<? super T>> queue;
+    private final AtomicInteger wip = new AtomicInteger();
 
-    final class ConnectionSubscriber
-    extends AtomicReference<Subscription>
-    implements FlowableSubscriber<T>, Subscription {
+    // cancellation of downstrem subscribers is tracked
+    private final AtomicInteger cancelled = new AtomicInteger();
 
-        private static final long serialVersionUID = 152064694420235350L;
-        final Subscriber<? super T> subscriber;
-        final CompositeDisposable currentBase;
-        final Disposable resource;
+    // mutable
+    private int subscriptionCount;
 
-        final AtomicLong requested;
+    // contains the disposable obtained from the connect option
+    // disposing this disposable disconnects the ConnectableFlowable from
+    // it's source
+    private Disposable connectDisposable;
 
-        ConnectionSubscriber(Subscriber<? super T> subscriber,
-                CompositeDisposable currentBase, Disposable resource) {
-            this.subscriber = subscriber;
-            this.currentBase = currentBase;
-            this.resource = resource;
-            this.requested = new AtomicLong();
+    public FlowableRefCount(ConnectableFlowable<T> source) {
+        super(source);
+        this.queue = new MpscLinkedQueue<Subscriber<? super T>>();
+    }
+
+    @Override
+    protected void subscribeActual(Subscriber<? super T> s) {
+        queue.offer(s);
+        drain();
+    }
+
+    @Override
+    public void accept(Disposable d) throws Exception {
+        connectDisposable = d;
+    }
+
+    private void drain() {
+        if (wip.getAndIncrement() == 0) {
+            while (true) {
+                checkToDisposeConnect();
+                boolean firstTime = true;
+                Subscriber<? super T> s;
+                while ((s = queue.poll()) != null) {
+                    if (!firstTime) {
+                        checkToDisposeConnect();
+                    } else {
+                        firstTime = false;
+                    }
+                    subscriptionCount++;
+                    if (subscriptionCount == 1) {
+                        ((ConnectableFlowable<T>) super.source).connect(this);
+                    }
+                    RefCountSubscriber subscriber = new RefCountSubscriber(s);
+                    s.onSubscribe(subscriber);
+                    super.source.subscribe(subscriber);
+                }
+                if (wip.decrementAndGet() == 0) {
+                    return;
+                }
+            }
+        }
+    }
+
+    private void checkToDisposeConnect() {
+        int c = cancelled.get();
+        if (subscriptionCount == c) {
+            if (connectDisposable != null) {
+                connectDisposable.dispose();
+            }
+            subscriptionCount = 0;
+            cancelled.addAndGet(-c);
+        }
+    }
+
+    final class RefCountSubscriber implements Subscriber<T>, Subscription {
+
+        private final Subscriber<? super T> child;
+        private Subscription parentSubscription;
+
+        RefCountSubscriber(Subscriber<? super T> child) {
+            this.child = child;
         }
 
         @Override
         public void onSubscribe(Subscription s) {
-            SubscriptionHelper.deferredSetOnce(this, requested, s);
-        }
-
-        @Override
-        public void onError(Throwable e) {
-            cleanup();
-            subscriber.onError(e);
+            this.parentSubscription = s;
         }
 
         @Override
         public void onNext(T t) {
-            subscriber.onNext(t);
+            child.onNext(t);
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            child.onError(t);
         }
 
         @Override
         public void onComplete() {
-            cleanup();
-            subscriber.onComplete();
+            child.onComplete();
         }
 
         @Override
         public void request(long n) {
-            SubscriptionHelper.deferredRequest(this, requested, n);
+            parentSubscription.request(n);
         }
 
         @Override
         public void cancel() {
-            SubscriptionHelper.cancel(this);
-            resource.dispose();
-        }
-
-        void cleanup() {
-            // on error or completion we need to dispose the base CompositeDisposable
-            // and set the subscriptionCount to 0
-            lock.lock();
-            try {
-                if (baseDisposable == currentBase) {
-                    if (source instanceof Disposable) {
-                        ((Disposable)source).dispose();
-                    }
-                    baseDisposable.dispose();
-                    baseDisposable = new CompositeDisposable();
-                    subscriptionCount.set(0);
-                }
-            } finally {
-                lock.unlock();
-            }
-        }
-    }
-
-    /**
-     * Constructor.
-     *
-     * @param source
-     *            observable to apply ref count to
-     */
-    public FlowableRefCount(ConnectableFlowable<T> source) {
-        super(source);
-        this.source = source;
-    }
-
-    @Override
-    public void subscribeActual(final Subscriber<? super T> subscriber) {
-
-        lock.lock();
-        if (subscriptionCount.incrementAndGet() == 1) {
-
-            final AtomicBoolean writeLocked = new AtomicBoolean(true);
-
-            try {
-                // need to use this overload of connect to ensure that
-                // baseSubscription is set in the case that source is a
-                // synchronous Observable
-                source.connect(onSubscribe(subscriber, writeLocked));
-            } finally {
-                // need to cover the case where the source is subscribed to
-                // outside of this class thus preventing the Consumer passed
-                // to source.connect above being called
-                if (writeLocked.get()) {
-                    // Consumer passed to source.connect was not called
-                    lock.unlock();
-                }
-            }
-        } else {
-            try {
-                // ready to subscribe to source so do it
-                doSubscribe(subscriber, baseDisposable);
-            } finally {
-                // release the read lock
-                lock.unlock();
-            }
+            parentSubscription.cancel();
+            cancelled.incrementAndGet();
+            drain();
         }
 
     }
 
-    private Consumer<Disposable> onSubscribe(final Subscriber<? super T> subscriber,
-            final AtomicBoolean writeLocked) {
-        return new DisposeConsumer(subscriber, writeLocked);
-    }
-
-    void doSubscribe(final Subscriber<? super T> subscriber, final CompositeDisposable currentBase) {
-        // handle disposing from the base subscription
-        Disposable d = disconnect(currentBase);
-
-        ConnectionSubscriber connection = new ConnectionSubscriber(subscriber, currentBase, d);
-        subscriber.onSubscribe(connection);
-
-        source.subscribe(connection);
-    }
-
-    private Disposable disconnect(final CompositeDisposable current) {
-        return Disposables.fromRunnable(new DisposeTask(current));
-    }
-
-    final class DisposeConsumer implements Consumer<Disposable> {
-        private final Subscriber<? super T> subscriber;
-        private final AtomicBoolean writeLocked;
-
-        DisposeConsumer(Subscriber<? super T> subscriber, AtomicBoolean writeLocked) {
-            this.subscriber = subscriber;
-            this.writeLocked = writeLocked;
-        }
-
-        @Override
-        public void accept(Disposable subscription) {
-            try {
-                baseDisposable.add(subscription);
-                // ready to subscribe to source so do it
-                doSubscribe(subscriber, baseDisposable);
-            } finally {
-                // release the write lock
-                lock.unlock();
-                writeLocked.set(false);
-            }
-        }
-    }
-
-    final class DisposeTask implements Runnable {
-        private final CompositeDisposable current;
-
-        DisposeTask(CompositeDisposable current) {
-            this.current = current;
-        }
-
-        @Override
-        public void run() {
-            lock.lock();
-            try {
-                if (baseDisposable == current) {
-                    if (subscriptionCount.decrementAndGet() == 0) {
-                        if (source instanceof Disposable) {
-                            ((Disposable)source).dispose();
-                        }
-
-                        baseDisposable.dispose();
-                        // need a new baseDisposable because once
-                        // disposed stays that way
-                        baseDisposable = new CompositeDisposable();
-                    }
-                }
-            } finally {
-                lock.unlock();
-            }
-        }
-    }
 }
