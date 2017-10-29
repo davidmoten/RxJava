@@ -30,9 +30,15 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T>
     private final SimplePlainQueue<Subscriber<? super T>> queue;
     private final AtomicInteger wip = new AtomicInteger();
 
+    // cancellation of downstrem subscribers is tracked
+    private final AtomicInteger cancelled = new AtomicInteger();
+
     // mutable
     private int subscriptionCount;
-    private AtomicInteger cancelled = new AtomicInteger();
+
+    // contains the disposable obtained from the connect option
+    // disposing this disposable disconnects the ConnectableFlowable from
+    // it's source
     private Disposable connectDisposable;
 
     public FlowableRefCount2(ConnectableFlowable<T> source) {
@@ -56,7 +62,7 @@ public class FlowableRefCount2<T> extends AbstractFlowableWithUpstream<T, T>
                     if (!firstTime) {
                         checkToDisposeConnect();
                     } else {
-                        firstTime = true;
+                        firstTime = false;
                     }
                     subscriptionCount++;
                     if (subscriptionCount == 1) {
