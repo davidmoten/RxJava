@@ -32,8 +32,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
     private final SimplePlainQueue<Subscriber<? super T>> queue;
     private final AtomicInteger wip = new AtomicInteger();
 
-    private final AtomicReference<SubsAndCancels> subs = new AtomicReference<SubsAndCancels>(
-            new SubsAndCancels(0, 0));
+    private final AtomicInteger subscriptionCount = new AtomicInteger();
 
     // contains the disposable obtained from the connect option
     // disposing this disposable disconnects the ConnectableFlowable from
@@ -67,14 +66,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                     } else {
                         RefCountSubscriber subscriber = new RefCountSubscriber(s);
                         super.source.subscribe(subscriber);
-                        while (true) {
-                            SubsAndCancels sub = subs.get();
-                            if (subs.compareAndSet(sub,
-                                    new SubsAndCancels(sub.subscriptionCount + 1, sub.cancelled))) {
-                                break;
-                            }
-                        }
-                        if (subs.get().subscriptionCount == 1) {
+                        if (subscriptionCount.incrementAndGet() == 1) {
                             ((ConnectableFlowable<T>) super.source).connect(this);
                         }
                     }
@@ -85,24 +77,6 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                 }
             }
         }
-    }
-
-    private void cancelOne() {
-        while (true) {
-            SubsAndCancels s = subs.get();
-            if (s.subscriptionCount == s.cancelled + 1) {
-                if (subs.compareAndSet(s, new SubsAndCancels(0, 0))) {
-                    if (connectDisposable != null) {
-                        connectDisposable.dispose();
-                    }
-                    break;
-                }
-            } else if (subs.compareAndSet(s,
-                    new SubsAndCancels(s.subscriptionCount, s.cancelled + 1))) {
-                break;
-            }
-        }
-        drain();
     }
 
     static class SubsAndCancels {
@@ -161,7 +135,10 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
 
         private void done() {
             if (done.compareAndSet(false, true)) {
-                cancelOne();
+                if (subscriptionCount.decrementAndGet() == 0) {
+                    connectDisposable.dispose();
+                    drain();
+                }
             }
         }
 
