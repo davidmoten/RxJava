@@ -127,6 +127,8 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
             if (done.compareAndSet(false, true)) {
                 if (subscriptionCount.decrementAndGet() == 0) {
                     connectDisposable.dispose();
+                    // ensure no memory leak because we hung onto the upstream disposable
+                    connectDisposable = null;
                     drain();
                 }
             }
