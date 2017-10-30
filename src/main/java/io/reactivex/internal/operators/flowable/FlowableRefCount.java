@@ -64,9 +64,13 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                         break;
                     } else {
                         RefCountSubscriber subscriber = new RefCountSubscriber(s);
+                        System.out.println("subscribing");
                         super.source.subscribe(subscriber);
+                        System.out.println("subscribed");
                         if (subscriptionCount.incrementAndGet() == 1) {
+                            System.out.println("connecting");
                             ((ConnectableFlowable<T>) super.source).connect(this);
+                            System.out.println("connected");
                         }
                     }
                 }
@@ -81,7 +85,14 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
     final class RefCountSubscriber implements Subscriber<T>, Subscription {
 
         private final Subscriber<? super T> child;
-        private final AtomicBoolean done = new AtomicBoolean();
+        private final AtomicInteger state = new AtomicInteger(
+                STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED);
+
+        private static final int STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED = 0;
+        private static final int STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED = 1;
+        private static final int STATE_SUBSCRIBED_SUB_COUNT_INCREMENTED = 2;
+        private static final int STATE_DONE = 3;
+
         private Subscription parentSubscription;
 
         RefCountSubscriber(Subscriber<? super T> child) {
@@ -123,13 +134,30 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
         }
 
         private void done() {
-            if (done.compareAndSet(false, true)) {
-                if (subscriptionCount.decrementAndGet() == 0) {
-                    connectDisposable.dispose();
-                    // ensure no memory leak because we hung onto the upstream disposable
-                    connectDisposable = null;
-                    drain();
+            while (true) {
+                int s = state.get();
+                if (s == STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED ) {
+                    if (state.compareAndSet(s, STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED)) {
+                    return;
+                    }
+                } else {
+                    
                 }
+            }
+            
+            if (done.compareAndSet(false, true)) {
+                checkForDispose();
+            }
+        }
+
+        private void checkForDispose() {
+            if (canCheckForDispose && subscriptionCount.decrementAndGet() == 0) {
+                System.out.println("disposing");
+                connectDisposable.dispose();
+                System.out.println("disposed");
+                // ensure no memory leak because we hung onto the upstream disposable
+                connectDisposable = null;
+                drain();
             }
         }
 
