@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.flowable;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.reactivestreams.Subscriber;
@@ -98,6 +99,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
 
         private final Subscriber<? super T> child;
         private Subscription parentSubscription;
+        private AtomicBoolean done = new AtomicBoolean();
 
         RefCountSubscriber(Subscriber<? super T> child) {
             this.child = child;
@@ -117,11 +119,13 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
         @Override
         public void onError(Throwable t) {
             child.onError(t);
+            done();
         }
 
         @Override
         public void onComplete() {
             child.onComplete();
+            done();
         }
 
         @Override
@@ -132,8 +136,14 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
         @Override
         public void cancel() {
             parentSubscription.cancel();
-            cancelled.incrementAndGet();
-            drain();
+            done();
+        }
+
+        private void done() {
+            if (done.compareAndSet(false, true)) {
+                cancelled.incrementAndGet();
+                drain();
+            }
         }
 
     }
