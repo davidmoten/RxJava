@@ -15,7 +15,6 @@ package io.reactivex.internal.operators.flowable;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -82,8 +81,8 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
     final class RefCountSubscriber implements Subscriber<T>, Subscription {
 
         private final Subscriber<? super T> child;
+        private final AtomicBoolean done = new AtomicBoolean();
         private Subscription parentSubscription;
-        private AtomicBoolean done = new AtomicBoolean();
 
         RefCountSubscriber(Subscriber<? super T> child) {
             this.child = child;
