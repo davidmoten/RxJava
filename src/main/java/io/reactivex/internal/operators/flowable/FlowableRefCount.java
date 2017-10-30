@@ -34,7 +34,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
 
     private final AtomicInteger subscriptionCount = new AtomicInteger();
 
-    // contains the disposable obtained from the connect option
+    // contains the disposable obtained from the connect
     // disposing this disposable disconnects the ConnectableFlowable from
     // it's source
     private Disposable connectDisposable;
@@ -76,16 +76,6 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                     return;
                 }
             }
-        }
-    }
-
-    static class SubsAndCancels {
-        final int subscriptionCount;
-        final int cancelled;
-
-        SubsAndCancels(int subscriptionCount, int cancelled) {
-            this.subscriptionCount = subscriptionCount;
-            this.cancelled = cancelled;
         }
     }
 
