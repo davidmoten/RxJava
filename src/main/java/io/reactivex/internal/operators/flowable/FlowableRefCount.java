@@ -61,20 +61,18 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
         if (wip.getAndIncrement() == 0) {
             int missed = 1;
             while (true) {
-                checkToDisposeConnect();
-                boolean firstTime = true;
-                Subscriber<? super T> s;
-                while ((s = queue.poll()) != null) {
-                    if (!firstTime) {
-                        checkToDisposeConnect();
+                while (true) {
+                    checkToDisposeConnect();
+                    Subscriber<? super T> s = queue.poll();
+                    if (s == null) {
+                        break;
                     } else {
-                        firstTime = false;
-                    }
-                    RefCountSubscriber subscriber = new RefCountSubscriber(s);
-                    super.source.subscribe(subscriber);
-                    subscriptionCount++;
-                    if (subscriptionCount == 1) {
-                        ((ConnectableFlowable<T>) super.source).connect(this);
+                        RefCountSubscriber subscriber = new RefCountSubscriber(s);
+                        super.source.subscribe(subscriber);
+                        subscriptionCount++;
+                        if (subscriptionCount == 1) {
+                            ((ConnectableFlowable<T>) super.source).connect(this);
+                        }
                     }
                 }
                 missed = wip.addAndGet(-missed);
