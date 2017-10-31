@@ -14,13 +14,16 @@
 package io.reactivex.internal.operators.flowable;
 
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
 import io.reactivex.disposables.Disposable;
+import io.reactivex.disposables.Disposables;
 import io.reactivex.flowables.ConnectableFlowable;
 import io.reactivex.functions.Consumer;
+import io.reactivex.internal.disposables.DisposableHelper;
 import io.reactivex.internal.fuseable.SimplePlainQueue;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 
@@ -34,7 +37,8 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
     // contains the disposable obtained from the connect
     // disposing this disposable disconnects the ConnectableFlowable from
     // it's source
-    private volatile Disposable connectDisposable;
+    private final AtomicReference<Disposable> connectDisposable = new AtomicReference<Disposable>(
+            Disposables.disposed());
 
     public FlowableRefCount(ConnectableFlowable<T> source) {
         super(source);
@@ -166,11 +170,12 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
         }
 
         private void decrementAndCheckForDisposal() {
+            Disposable d = connectDisposable.get();
             if (subscriptionCount.decrementAndGet() == 0) {
                 System.out.println("disposing");
-                connectDisposable.dispose();
+                d.dispose();
                 // ensure no memory leak because we hung onto the upstream disposable
-                connectDisposable = null;
+                connectDisposable.compareAndSet(d, Disposables.disposed());
                 drain();
                 return;
             } else {
@@ -180,7 +185,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
 
         @Override
         public void accept(Disposable d) throws Exception {
-            connectDisposable = d;
+            DisposableHelper.set(connectDisposable, d);
             markAsConnected();
         }
 
