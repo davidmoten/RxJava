@@ -165,8 +165,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
                         decrementAndCheckForDisposal();
                         return;
                     }
-                } else {
-                    // if done or cancelled while checking
+                } else if (state.compareAndSet(s, s)){
                     return;
                 }
             }
