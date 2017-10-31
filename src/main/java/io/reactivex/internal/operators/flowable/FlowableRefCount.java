@@ -24,7 +24,7 @@ import io.reactivex.functions.Consumer;
 import io.reactivex.internal.fuseable.SimplePlainQueue;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 
-public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> implements Consumer<Disposable> {
+public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
 
     private final SimplePlainQueue<Subscriber<? super T>> queue;
     private final AtomicInteger wip = new AtomicInteger();
@@ -47,13 +47,6 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
         drain();
     }
 
-    @Override
-    public void accept(Disposable d) throws Exception {
-        connectDisposable = d;
-        if (d.isDisposed())
-            System.out.println("isDisposed=true");
-    }
-
     private void drain() {
         System.out.println("drain called");
         if (wip.getAndIncrement() == 0) {
@@ -71,10 +64,11 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
                         System.out.println("subscribed");
                         if (subscriptionCount.incrementAndGet() == 1) {
                             System.out.println("connecting");
-                            ((ConnectableFlowable<T>) super.source).connect(this);
+                            ((ConnectableFlowable<T>) super.source).connect(subscriber);
                             System.out.println("connected");
+                        } else {
+                            subscriber.markAsConnected();
                         }
-                        subscriber.markAsConnected();
                     }
                 }
                 missed = wip.addAndGet(-missed);
@@ -85,7 +79,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
         }
     }
 
-    final class RefCountSubscriber implements Subscriber<T>, Subscription {
+    final class RefCountSubscriber implements Subscriber<T>, Subscription, Consumer<Disposable> {
 
         private final Subscriber<? super T> child;
         private Subscription parentSubscription;
@@ -165,7 +159,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
                         decrementAndCheckForDisposal();
                         return;
                     }
-                } else if (state.compareAndSet(s, s)){
+                } else if (state.compareAndSet(s, s)) {
                     return;
                 }
             }
@@ -182,6 +176,12 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
             } else {
                 return;
             }
+        }
+
+        @Override
+        public void accept(Disposable d) throws Exception {
+            connectDisposable = d;
+            markAsConnected();
         }
 
     }
