@@ -13,7 +13,6 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.reactivestreams.Subscriber;
@@ -25,8 +24,7 @@ import io.reactivex.functions.Consumer;
 import io.reactivex.internal.fuseable.SimplePlainQueue;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 
-public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
-        implements Consumer<Disposable> {
+public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> implements Consumer<Disposable> {
 
     private final SimplePlainQueue<Subscriber<? super T>> queue;
     private final AtomicInteger wip = new AtomicInteger();
@@ -68,9 +66,12 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
                         super.source.subscribe(subscriber);
                         System.out.println("subscribed");
                         if (subscriptionCount.incrementAndGet() == 1) {
+                            subscriber.subscriptionCountIncremented();
                             System.out.println("connecting");
                             ((ConnectableFlowable<T>) super.source).connect(this);
                             System.out.println("connected");
+                        } else {
+                            subscriber.subscriptionCountIncremented();
                         }
                     }
                 }
@@ -85,8 +86,22 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
     final class RefCountSubscriber implements Subscriber<T>, Subscription {
 
         private final Subscriber<? super T> child;
-        private final AtomicInteger state = new AtomicInteger(
-                STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED);
+
+        /**
+         * -
+         * 
+         * <pre>
+         *  
+         * STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED 
+         *     -&gt; STATE_SUBSCRIBED_SUB_COUNT_INCREMENTED
+         *         -&gt; STATE_DONE 
+         *     -&gt; STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED 
+         *         -&gt; STATE_DONE
+         * 
+         * </pre>
+         * 
+         */
+        private final AtomicInteger state = new AtomicInteger(STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED);
 
         private static final int STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED = 0;
         private static final int STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED = 1;
@@ -129,29 +144,51 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
 
         @Override
         public void cancel() {
+            System.out.println("cancelled");
             parentSubscription.cancel();
             done();
+        }
+
+        void subscriptionCountIncremented() {
+            while (true) {
+                int s = state.get();
+                if (s == STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED) {
+                    if (state.compareAndSet(s, STATE_DONE)) {
+                        checkForDispose();
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+
         }
 
         private void done() {
             while (true) {
                 int s = state.get();
-                if (s == STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED ) {
+                if (s == STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED) {
                     if (state.compareAndSet(s, STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED)) {
-                    return;
+                        return;
                     }
-                } else {
-                    
+                } else if (s == STATE_SUBSCRIBED_SUB_COUNT_INCREMENTED) {
+                    if (state.compareAndSet(s, STATE_DONE)) {
+                        checkForDispose();
+                        return;
+                    }
+                } else if (s == STATE_DONE) {
+                    return;
+                } else if (s == STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED) {
+                    if (state.compareAndSet(s, s)) {
+                        return;
+                    }
                 }
             }
-            
-            if (done.compareAndSet(false, true)) {
-                checkForDispose();
-            }
+
         }
 
         private void checkForDispose() {
-            if (canCheckForDispose && subscriptionCount.decrementAndGet() == 0) {
+            if (subscriptionCount.decrementAndGet() == 0) {
                 System.out.println("disposing");
                 connectDisposable.dispose();
                 System.out.println("disposed");
