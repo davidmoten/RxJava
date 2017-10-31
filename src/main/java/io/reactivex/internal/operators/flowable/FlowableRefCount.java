@@ -13,6 +13,7 @@
 
 package io.reactivex.internal.operators.flowable;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.reactivestreams.Subscriber;
@@ -24,7 +25,8 @@ import io.reactivex.functions.Consumer;
 import io.reactivex.internal.fuseable.SimplePlainQueue;
 import io.reactivex.internal.queue.MpscLinkedQueue;
 
-public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> implements Consumer<Disposable> {
+public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T>
+        implements Consumer<Disposable> {
 
     private final SimplePlainQueue<Subscriber<? super T>> queue;
     private final AtomicInteger wip = new AtomicInteger();
@@ -62,16 +64,9 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
                         break;
                     } else {
                         RefCountSubscriber subscriber = new RefCountSubscriber(s);
-                        System.out.println("subscribing");
                         super.source.subscribe(subscriber);
-                        System.out.println("subscribed");
                         if (subscriptionCount.incrementAndGet() == 1) {
-                            subscriber.subscriptionCountIncremented();
-                            System.out.println("connecting");
                             ((ConnectableFlowable<T>) super.source).connect(this);
-                            System.out.println("connected");
-                        } else {
-                            subscriber.subscriptionCountIncremented();
                         }
                     }
                 }
@@ -86,28 +81,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
     final class RefCountSubscriber implements Subscriber<T>, Subscription {
 
         private final Subscriber<? super T> child;
-
-        /**
-         * -
-         * 
-         * <pre>
-         *  
-         * STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED 
-         *     -&gt; STATE_SUBSCRIBED_SUB_COUNT_INCREMENTED
-         *         -&gt; STATE_DONE 
-         *     -&gt; STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED 
-         *         -&gt; STATE_DONE
-         * 
-         * </pre>
-         * 
-         */
-        private final AtomicInteger state = new AtomicInteger(STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED);
-
-        private static final int STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED = 0;
-        private static final int STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED = 1;
-        private static final int STATE_SUBSCRIBED_SUB_COUNT_INCREMENTED = 2;
-        private static final int STATE_DONE = 3;
-
+        private final AtomicBoolean done = new AtomicBoolean();
         private Subscription parentSubscription;
 
         RefCountSubscriber(Subscriber<? super T> child) {
@@ -144,57 +118,18 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> impl
 
         @Override
         public void cancel() {
-            System.out.println("cancelled");
             parentSubscription.cancel();
             done();
         }
 
-        void subscriptionCountIncremented() {
-            while (true) {
-                int s = state.get();
-                if (s == STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED) {
-                    if (state.compareAndSet(s, STATE_DONE)) {
-                        checkForDispose();
-                        return;
-                    }
-                } else {
-                    return;
-                }
-            }
-
-        }
-
         private void done() {
-            while (true) {
-                int s = state.get();
-                if (s == STATE_SUBSCRIBED_SUB_COUNT_NOT_INCREMENTED) {
-                    if (state.compareAndSet(s, STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED)) {
-                        return;
-                    }
-                } else if (s == STATE_SUBSCRIBED_SUB_COUNT_INCREMENTED) {
-                    if (state.compareAndSet(s, STATE_DONE)) {
-                        checkForDispose();
-                        return;
-                    }
-                } else if (s == STATE_DONE) {
-                    return;
-                } else if (s == STATE_CANCELLED_SUB_COUNT_NOT_INCREMENTED) {
-                    if (state.compareAndSet(s, s)) {
-                        return;
-                    }
+            if (done.compareAndSet(false, true)) {
+                if (subscriptionCount.decrementAndGet() == 0) {
+                    connectDisposable.dispose();
+                    // ensure no memory leak because we hung onto the upstream disposable
+                    connectDisposable = null;
+                    drain();
                 }
-            }
-
-        }
-
-        private void checkForDispose() {
-            if (subscriptionCount.decrementAndGet() == 0) {
-                System.out.println("disposing");
-                connectDisposable.dispose();
-                System.out.println("disposed");
-                // ensure no memory leak because we hung onto the upstream disposable
-                connectDisposable = null;
-                drain();
             }
         }
 
