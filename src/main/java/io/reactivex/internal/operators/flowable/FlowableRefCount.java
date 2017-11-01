@@ -61,6 +61,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
                 while (true) {
                     Subscriber<? super T> s = queue.poll();
                     if (s == null) {
+                        log("queue empty");
                         break;
                     } else {
                         RefCountSubscriber subscriber = new RefCountSubscriber(s);
