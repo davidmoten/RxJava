@@ -191,10 +191,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
                 d.dispose();
                 // ensure no memory leak because we hung onto the upstream disposable
                 connectDisposable.compareAndSet(d, Disposables.disposed());
-                return;
-            } else {
-                return;
-            }
+            } 
         }
 
         @Override
@@ -204,8 +201,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
         }
 
         private String ths() {
-            String s = this.toString();
-            return abbrev(s);
+            return abbrev(this);
         }
 
     }
