@@ -526,6 +526,28 @@ public class FlowableRefCountTest {
         ts2.assertValue(30);
     }
 
+    @Test
+    public void testSynchronousRetry() {
+        final AtomicInteger count = new AtomicInteger();
+        Flowable.just(1).map(new Function<Integer, Object>() {
+            @Override
+            public Object apply(Integer n) throws Exception {
+                throw new RuntimeException("boo");
+            }
+        }) 
+          .doOnSubscribe(new Consumer<Subscription>() {
+            @Override
+            public void accept(Subscription s) throws Exception {
+                count.incrementAndGet();
+            }
+        })
+          .publish() //
+          .refCount() //
+          .retry(5) //
+          .test();
+        assertEquals(6, count.get());
+    }
+    
     @Test(timeout = 10000)
     public void testUpstreamErrorAllowsRetry() throws InterruptedException {
         final AtomicInteger intervalSubscribed = new AtomicInteger();

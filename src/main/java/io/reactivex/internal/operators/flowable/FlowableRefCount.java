@@ -64,13 +64,14 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
                         break;
                     } else {
                         RefCountSubscriber subscriber = new RefCountSubscriber(s);
-                        log("subscribing");
+                        log("subscribing " + abbrev(subscriber));
                         super.source.subscribe(subscriber);
-                        log("subscribed");
-                        if (subscriptionCount.incrementAndGet() == 1) {
-                            log("connecting");
+                        log("subscribed " + abbrev(subscriber));
+                        int sc = subscriptionCount.incrementAndGet();
+                        log("subscriptionCount=" + sc);
+                        if (sc == 1) {
+                            log("connecting " + abbrev(subscriber));
                             ((ConnectableFlowable<T>) super.source).connect(subscriber);
-                            log("connected");
                         } else {
                             subscriber.markAsConnected();
                         }
@@ -81,6 +82,8 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
                     return;
                 }
             }
+        } else {
+            log("drain missed");
         }
     }
 
@@ -102,8 +105,9 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
         @Override
         public void onSubscribe(Subscription s) {
             this.parentSubscription = s;
+            log("calling child onSubscribe " + ths());
             child.onSubscribe(this);
-            log("called child onSubscribe");
+            log("called child onSubscribe " + ths());
         }
 
         @Override
@@ -113,9 +117,14 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
 
         @Override
         public void onError(Throwable t) {
-            log("error arrived");
+            log("error arrived " + ths());
             child.onError(t);
             done();
+        }
+
+        private String ths() {
+            String s = this.toString();
+            return abbrev(s);
         }
 
         @Override
@@ -131,21 +140,24 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
 
         @Override
         public void cancel() {
-            log("cancelling");
+            log("cancelling " + ths());
             parentSubscription.cancel();
             done();
         }
 
         void markAsConnected() {
+            log("marking as connected " + ths() + ", state=" + state.get());
             while (true) {
                 int s = state.get();
                 if (s == CANCELLED_WHILE_CHECKING) {
                     if (state.compareAndSet(s, DONE)) {
+                        log("CANCELLED_WHILE_CHECKING -> DONE " + ths());
                         decrementAndCheckForDisposal();
                         return;
                     }
                 } else if (s == CHECKING_CONNECTION) {
                     if (state.compareAndSet(s, CONNECTED)) {
+                        log("CHECKING_CONNECTION -> CONNECTED " + ths());
                         return;
                     }
                 } else if (state.compareAndSet(s, s)) {
@@ -155,16 +167,18 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
         }
 
         private void done() {
-            log("done called with state " + state.get());
+            log("done called, state=" + state.get());
             while (true) {
                 int s = state.get();
                 if (s == CONNECTED) {
                     if (state.compareAndSet(s, DONE)) {
+                        log("CONNECTED -> DONE " + ths());
                         decrementAndCheckForDisposal();
                         return;
                     }
                 } else if (s == CHECKING_CONNECTION) {
                     if (state.compareAndSet(s, CANCELLED_WHILE_CHECKING)) {
+                        log("CHECKING_CONNECTION -> CANCELLED_WHILE_CHECKING " + ths());
                         return;
                     }
                 } else if (state.compareAndSet(s, s)) {
@@ -197,5 +211,13 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
 
     private static void log(String s) {
         System.out.println(Thread.currentThread().getName() + "|" + s);
+    }
+
+    private static String abbrev(String s) {
+        return s.substring(Math.max(0, s.length() - 4), s.length());
+    }
+
+    private static String abbrev(Object o) {
+        return abbrev(o.toString());
     }
 }
