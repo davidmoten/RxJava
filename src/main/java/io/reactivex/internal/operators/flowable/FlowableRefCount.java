@@ -122,11 +122,6 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
             done();
         }
 
-        private String ths() {
-            String s = this.toString();
-            return abbrev(s);
-        }
-
         @Override
         public void onComplete() {
             child.onComplete();
@@ -205,6 +200,11 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
         public void accept(Disposable d) throws Exception {
             DisposableHelper.set(connectDisposable, d);
             markAsConnected();
+        }
+
+        private String ths() {
+            String s = this.toString();
+            return abbrev(s);
         }
 
     }
