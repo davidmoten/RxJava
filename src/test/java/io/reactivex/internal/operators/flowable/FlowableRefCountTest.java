@@ -551,49 +551,49 @@ public class FlowableRefCountTest {
     @Test(timeout = 10000)
     public void testUpstreamErrorAllowsRetry() throws InterruptedException {
         final AtomicInteger intervalSubscribed = new AtomicInteger();
-        Flowable<String> interval =
-                Flowable.interval(200,TimeUnit.MILLISECONDS)
-                        .doOnSubscribe(new Consumer<Subscription>() {
-                            @Override
-                            public void accept(Subscription s) {
-                                            System.out.println("Subscribing to interval " + intervalSubscribed.incrementAndGet());
-                                    }
-                        }
-                         )
-                        .flatMap(new Function<Long, Publisher<String>>() {
-                            @Override
-                            public Publisher<String> apply(Long t1) {
-                                    return Flowable.defer(new Callable<Publisher<String>>() {
-                                        @Override
-                                        public Publisher<String> call() {
-                                                return Flowable.<String>error(new Exception("Some exception"));
-                                        }
-                                    });
-                            }
-                        })
-                        .onErrorResumeNext(new Function<Throwable, Publisher<String>>() {
-                            @Override
-                            public Publisher<String> apply(Throwable t1) {
-                                    return Flowable.error(t1);
-                            }
-                        })
-                        .publish()
-                        .refCount();
-
-        interval
-                .doOnError(new Consumer<Throwable>() {
+        Flowable<String> interval = Flowable
+                .interval(200, TimeUnit.MILLISECONDS)
+                .doOnSubscribe(new Consumer<Subscription>() {
                     @Override
-                    public void accept(Throwable t1) {
-                            System.out.println("Subscriber 1 onError: " + t1);
+                    public void accept(Subscription s) {
+                        System.out.println(
+                                "Subscribing to interval " + intervalSubscribed.incrementAndGet());
                     }
                 })
-                .retry(5)
-                .subscribe(new Consumer<String>() {
+                .flatMap(new Function<Long, Publisher<String>>() {
                     @Override
-                    public void accept(String t1) {
-                            System.out.println("Subscriber 1: " + t1);
+                    public Publisher<String> apply(Long t1) {
+                        return Flowable.defer(new Callable<Publisher<String>>() {
+                            @Override
+                            public Publisher<String> call() {
+                                return Flowable.<String>error(new Exception("Some exception"));
+                            }
+                        });
                     }
-                });
+                })
+                .onErrorResumeNext(new Function<Throwable, Publisher<String>>() {
+                    @Override
+                    public Publisher<String> apply(Throwable t1) {
+                        return Flowable.error(t1);
+                    }
+                })
+                .publish()
+                .refCount();
+
+        interval
+        .doOnError(new Consumer<Throwable>() {
+            @Override
+            public void accept(Throwable t1) {
+                System.out.println("Subscriber 1 onError: " + t1);
+            }
+        })
+        .retry(5)
+        .subscribe(new Consumer<String>() {
+            @Override
+            public void accept(String t1) {
+                System.out.println("Subscriber 1: " + t1);
+            }
+        });
         Thread.sleep(100);
         interval
         .doOnError(new Consumer<Throwable>() {
@@ -603,12 +603,12 @@ public class FlowableRefCountTest {
             }
         })
         .retry(5)
-                .subscribe(new Consumer<String>() {
-                    @Override
-                    public void accept(String t1) {
-                            System.out.println("Subscriber 2: " + t1);
-                    }
-                });
+        .subscribe(new Consumer<String>() {
+            @Override
+            public void accept(String t1) {
+                    System.out.println("Subscriber 2: " + t1);
+            }
+        });
 
         Thread.sleep(1300);
 
