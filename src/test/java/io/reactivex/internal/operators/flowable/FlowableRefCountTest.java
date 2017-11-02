@@ -616,6 +616,17 @@ public class FlowableRefCountTest {
         assertEquals(6, intervalSubscribed.get());
     }
 
+    @Test
+    public void testPublishError() {
+        ConnectableFlowable<Object> f = Flowable.error(new Exception("boo"))
+            .publish();
+        TestSubscriber<Object> ts = f.test();
+        f.connect();
+        ts.assertNotComplete().assertTerminated();
+        f.test()
+        .assertNoErrors().assertNotTerminated();
+    }
+    
     private enum CancelledSubscriber implements FlowableSubscriber<Integer> {
         INSTANCE;
 
