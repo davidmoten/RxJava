@@ -548,7 +548,7 @@ public class FlowableRefCountTest {
         assertEquals(6, count.get());
     }
     
-    @Test(timeout = 10000)
+    @Test(timeout = 1000000)
     public void testUpstreamErrorAllowsRetry() throws InterruptedException {
         final AtomicInteger intervalSubscribed = new AtomicInteger();
         Flowable<String> interval = Flowable
@@ -610,7 +610,7 @@ public class FlowableRefCountTest {
             }
         });
 
-        Thread.sleep(1300);
+        Thread.sleep(130000);
 
         System.out.println(intervalSubscribed.get());
         assertEquals(6, intervalSubscribed.get());

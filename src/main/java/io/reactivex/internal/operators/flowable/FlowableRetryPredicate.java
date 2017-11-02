@@ -105,12 +105,14 @@ public final class FlowableRetryPredicate<T> extends AbstractFlowableWithUpstrea
          * Subscribes to the source again via trampolining.
          */
         void subscribeNext() {
+            log("retry subscribeNext called");
             if (getAndIncrement() == 0) {
                 int missed = 1;
                 for (;;) {
                     if (sa.isCancelled()) {
                         return;
                     }
+                    log("retry calling subscribe");
                     source.subscribe(this);
 
                     missed = addAndGet(-missed);
@@ -120,5 +122,9 @@ public final class FlowableRetryPredicate<T> extends AbstractFlowableWithUpstrea
                 }
             }
         }
+    }
+    
+    private static void log(String s) {
+        System.out.println(Thread.currentThread().getName() + "|" + s);
     }
 }

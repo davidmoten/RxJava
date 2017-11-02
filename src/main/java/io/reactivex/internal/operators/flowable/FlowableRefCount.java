@@ -137,6 +137,7 @@ public class FlowableRefCount<T> extends AbstractFlowableWithUpstream<T, T> {
         @Override
         public void cancel() {
             log("cancelling " + ths());
+            Thread.dumpStack();
             parentSubscription.cancel();
             done();
         }
