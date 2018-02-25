@@ -48,7 +48,7 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
     final Func1<? super T, ? extends V> valueSelector;
     final int bufferSize;
     final boolean delayError;
-    final Func1<Action1<K>, Map<K, Object>> mapFactory;
+    final Func1<Action1<Object>, Map<K, Object>> mapFactory;
 
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public OperatorGroupBy(Func1<? super T, ? extends K> keySelector) {
@@ -59,11 +59,11 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
         this(keySelector, valueSelector, RxRingBuffer.SIZE, false, null);
     }
 
-    public OperatorGroupBy(Func1<? super T, ? extends K> keySelector, Func1<? super T, ? extends V> valueSelector, Func1<Action1<K>, Map<K, Object>> mapFactory) {
+    public OperatorGroupBy(Func1<? super T, ? extends K> keySelector, Func1<? super T, ? extends V> valueSelector, Func1<Action1<Object>, Map<K, Object>> mapFactory) {
         this(keySelector, valueSelector, RxRingBuffer.SIZE, false, mapFactory);
     }
 
-    public OperatorGroupBy(Func1<? super T, ? extends K> keySelector, Func1<? super T, ? extends V> valueSelector, int bufferSize, boolean delayError, Func1<Action1<K>, Map<K, Object>> mapFactory) {
+    public OperatorGroupBy(Func1<? super T, ? extends K> keySelector, Func1<? super T, ? extends V> valueSelector, int bufferSize, boolean delayError, Func1<Action1<Object>, Map<K, Object>> mapFactory) {
         this.keySelector = keySelector;
         this.valueSelector = valueSelector;
         this.bufferSize = bufferSize;
@@ -118,7 +118,7 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
         final Map<Object, GroupedUnicast<K, V>> groups;
         final Queue<GroupedObservable<K, V>> queue;
         final GroupByProducer producer;
-        final Queue<K> evictedKeys;
+        final Queue<GroupedUnicast<K, V>> evictedGroups;
 
         static final Object NULL_KEY = new Object();
 
@@ -135,9 +135,10 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
 
         final AtomicInteger wip;
 
+        @SuppressWarnings("unchecked")
         public GroupBySubscriber(Subscriber<? super GroupedObservable<K, V>> actual, Func1<? super T, ? extends K> keySelector,
                 Func1<? super T, ? extends V> valueSelector, int bufferSize, boolean delayError,
-                Func1<Action1<K>, Map<K, Object>> mapFactory) {
+                Func1<Action1<Object>, Map<K, Object>> mapFactory) {
             this.actual = actual;
             this.keySelector = keySelector;
             this.valueSelector = valueSelector;
@@ -152,31 +153,27 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
             this.groupCount = new AtomicInteger(1);
             this.wip = new AtomicInteger();
             if (mapFactory == null) {
+                this.evictedGroups = null;
                 this.groups = new ConcurrentHashMap<Object, GroupedUnicast<K, V>>();
-                this.evictedKeys = null;
             } else {
-                this.evictedKeys = new ConcurrentLinkedQueue<K>();
-                this.groups = createMap(mapFactory, new EvictionAction<K>(evictedKeys));
+                this.evictedGroups = new ConcurrentLinkedQueue<GroupedUnicast<K, V>>();
+                this.groups = (Map<Object, GroupedUnicast<K,V>>)(Map<Object, ?>) 
+                        mapFactory.call((Action1<Object>)(Action1<?>)new EvictionAction<K, V>(evictedGroups));
             }
         }
 
-        static class EvictionAction<K> implements Action1<K> {
+        static class EvictionAction<K, V> implements Action1<GroupedUnicast<K, V>> {
 
-            final Queue<K> evictedKeys;
+            final Queue<GroupedUnicast<K, V>> evictedGroups;
 
-            EvictionAction(Queue<K> evictedKeys) {
-                this.evictedKeys = evictedKeys;
+            EvictionAction(Queue<GroupedUnicast<K, V>> evictedGroups) {
+                this.evictedGroups = evictedGroups;
             }
 
             @Override
-            public void call(K key) {
-                evictedKeys.offer(key);
+            public void call(GroupedUnicast<K,V> group) {
+                evictedGroups.offer(group);
             }
-        }
-
-        @SuppressWarnings("unchecked")
-        private Map<Object, GroupedUnicast<K, V>> createMap(Func1<Action1<K>, Map<K, Object>> mapFactory, Action1<K> evictionAction) {
-            return (Map<Object, GroupedUnicast<K,V>>)(Map<Object, ?>) mapFactory.call(evictionAction);
         }
 
         @Override
@@ -231,13 +228,10 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
 
             group.onNext(v);
 
-            if (evictedKeys != null) {
-                K evictedKey;
-                while ((evictedKey = evictedKeys.poll()) != null) {
-                    GroupedUnicast<K, V> g = groups.get(evictedKey);
-                    if (g != null) {
-                        g.onComplete();
-                    }
+            if (evictedGroups != null) {
+                GroupedUnicast<K, V> evictedGroup;
+                while ((evictedGroup = evictedGroups.poll()) != null) {
+                    evictedGroup.onComplete();
                 }
             }
 
@@ -269,8 +263,8 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
                 e.onComplete();
             }
             groups.clear();
-            if (evictedKeys != null) {
-                evictedKeys.clear();
+            if (evictedGroups != null) {
+                evictedGroups.clear();
             }
 
             done = true;
@@ -363,8 +357,8 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
             q.clear();
             List<GroupedUnicast<K, V>> list = new ArrayList<GroupedUnicast<K, V>>(groups.values());
             groups.clear();
-            if (evictedKeys != null) {
-                evictedKeys.clear();
+            if (evictedGroups != null) {
+                evictedGroups.clear();
             }
 
             for (GroupedUnicast<K, V> e : list) {

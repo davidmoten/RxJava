@@ -7336,7 +7336,7 @@ public class Observable<T> {
      * @since 1.3
      */
     public final <K, R> Observable<GroupedObservable<K, R>> groupBy(final Func1<? super T, ? extends K> keySelector,
-            final Func1<? super T, ? extends R> elementSelector, final Func1<Action1<K>, Map<K, Object>> evictingMapFactory) {
+            final Func1<? super T, ? extends R> elementSelector, final Func1<Action1<Object>, Map<K, Object>> evictingMapFactory) {
         if (evictingMapFactory == null) {
             throw new NullPointerException("evictingMapFactory cannot be null");
         }

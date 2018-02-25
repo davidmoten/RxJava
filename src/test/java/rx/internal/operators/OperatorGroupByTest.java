@@ -1824,14 +1824,14 @@ public class OperatorGroupByTest {
         final List<Integer> evictedKeys = new ArrayList<Integer>();
         //normally would use Guava CacheBuilder or similar but for a bit more
         //control make something custom
-        Func1<Action1<Integer>, Map<Integer, Object>> mapFactory = new Func1<Action1<Integer>, Map<Integer, Object>>() {
+        Func1<Action1<Object>, Map<Integer, Object>> mapFactory = new Func1<Action1<Object>, Map<Integer, Object>>() {
             @Override
-            public Map<Integer, Object> call(final Action1<Integer> evicted) {
+            public Map<Integer, Object> call(final Action1<Object> evicted) {
                 // is a bit risky to override the put method because
                 // of possible side-effects (e.g. remove could call put and we did not know it)
                 // to fix just need to use composition but needs a verbose implementation of Map
                 // interface
-                return new ConcurrentHashMap<Integer,Object>() {
+                return new ConcurrentHashMap<Integer, Object>() {
                     private static final long serialVersionUID = -7519109652858021153L;
 
                     Integer lastKey;
@@ -1839,8 +1839,8 @@ public class OperatorGroupByTest {
                     @Override
                     public Object put(Integer key, Object value) {
                         if (this.size() >= 5) {
-                            super.remove(lastKey);
-                            evicted.call(lastKey);
+                            Object evictedValue = super.remove(lastKey);
+                            evicted.call(evictedValue);
                             evictedKeys.add(lastKey);
                         }
                         Object result = super.put(key, value);
@@ -1851,7 +1851,7 @@ public class OperatorGroupByTest {
         TestSubscriber<String> ts = TestSubscriber.create();
         Observable
             .range(1, 100)
-            .groupBy(keySelector,elementSelector, mapFactory)
+            .groupBy(keySelector, elementSelector, mapFactory)
             .flatMap(new Func1<GroupedObservable<Integer, Integer>, Observable<String>>() {
                 @Override
                 public Observable<String> call(final GroupedObservable<Integer, Integer> g) {
@@ -1888,7 +1888,7 @@ public class OperatorGroupByTest {
     @Test
     public void testEvictingMapFactoryIfMapPutThrowsRuntimeExceptionThenErrorEmittedByStream() {
         final RuntimeException exception = new RuntimeException("boo");
-        Func1<Action1<Integer>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnPut(exception);
+        Func1<Action1<Object>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnPut(exception);
         TestSubscriber<Object> ts = TestSubscriber.create();
         Observable
             .range(1, 100)
@@ -1901,7 +1901,7 @@ public class OperatorGroupByTest {
     @Test(expected = OnErrorNotImplementedException.class)
     public void testEvictingMapFactoryIfMapPutThrowsFatalErrorThenErrorThrownBySubscribe() {
         final RuntimeException exception = new OnErrorNotImplementedException("boo", new RuntimeException());
-        Func1<Action1<Integer>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnPut(exception);
+        Func1<Action1<Object>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnPut(exception);
         TestSubscriber<Object> ts = TestSubscriber.create();
         Observable
             .range(1, 100)
@@ -1910,12 +1910,12 @@ public class OperatorGroupByTest {
             .subscribe(ts);
     }
 
-    private static Func1<Action1<Integer>, Map<Integer, Object>> createMapFactoryThatThrowsOnPut(
+    private static Func1<Action1<Object>, Map<Integer, Object>> createMapFactoryThatThrowsOnPut(
             final RuntimeException exception) {
-        return new Func1<Action1<Integer>, Map<Integer, Object>>() {
+        return new Func1<Action1<Object>, Map<Integer, Object>>() {
             @SuppressWarnings("serial")
             @Override
-            public Map<Integer, Object> call(final Action1<Integer> evicted) {
+            public Map<Integer, Object> call(final Action1<Object> evicted) {
                 // is a bit risky to override the put method because
                 // of possible side-effects (e.g. remove could call put and we did not know it)
                 // to fix just need to use composition but needs a verbose implementation of Map
@@ -1932,16 +1932,16 @@ public class OperatorGroupByTest {
     @Test
     public void mapFactoryEvictionWorksWithGuavaCache() {
         final List<Integer> evictedKeys = new ArrayList<Integer>();
-        Func1<Action1<Integer>, Map<Integer, Object>> mapFactory =
-            new Func1<Action1<Integer>, Map<Integer, Object>>() {
+        Func1<Action1<Object>, Map<Integer, Object>> mapFactory =
+            new Func1<Action1<Object>, Map<Integer, Object>>() {
                 @Override
-                public Map<Integer, Object> call(final Action1<Integer> action) {
+                public Map<Integer, Object> call(final Action1<Object> action) {
                     return CacheBuilder.newBuilder()
                         .maximumSize(5)
                         .removalListener(new RemovalListener<Integer, Object>() {
                             @Override
                             public void onRemoval(RemovalNotification<Integer, Object> notification) {
-                                action.call(notification.getKey());
+                                action.call(notification.getValue());
                                 evictedKeys.add(notification.getKey());
                             }
                         })
@@ -1989,7 +1989,7 @@ public class OperatorGroupByTest {
     @Test
     public void testEvictingMapFactoryIfMapCreateThrowsRuntimeExceptionThenErrorEmittedByStream() {
         final RuntimeException exception = new RuntimeException("boo");
-        Func1<Action1<Integer>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnCreate(exception);
+        Func1<Action1<Object>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnCreate(exception);
         TestSubscriber<Object> ts = TestSubscriber.create();
         Observable
             .range(1, 100)
@@ -2002,7 +2002,7 @@ public class OperatorGroupByTest {
     @Test(expected = OnErrorNotImplementedException.class)
     public void testEvictingMapFactoryIfMapCreateThrowsFatalErrorThenSubscribeThrows() {
         final OnErrorNotImplementedException exception = new OnErrorNotImplementedException("boo", new RuntimeException());
-        Func1<Action1<Integer>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnCreate(exception);
+        Func1<Action1<Object>, Map<Integer, Object>> mapFactory = createMapFactoryThatThrowsOnCreate(exception);
         TestSubscriber<Object> ts = TestSubscriber.create();
         Observable
             .range(1, 100)
@@ -2011,12 +2011,12 @@ public class OperatorGroupByTest {
             .subscribe(ts);
     }
 
-    private static Func1<Action1<Integer>, Map<Integer, Object>> createMapFactoryThatThrowsOnCreate(
+    private static Func1<Action1<Object>, Map<Integer, Object>> createMapFactoryThatThrowsOnCreate(
             final RuntimeException exception) {
-        return new Func1<Action1<Integer>, Map<Integer, Object>>() {
+        return new Func1<Action1<Object>, Map<Integer, Object>>() {
 
             @Override
-            public Map<Integer, Object> call(Action1<Integer> t) {
+            public Map<Integer, Object> call(Action1<Object> t) {
                 throw exception;
             }};
     }
@@ -2054,11 +2054,11 @@ public class OperatorGroupByTest {
     @Test
     public void mapFactoryThrows() {
         final RuntimeException ex = new RuntimeException("boo");
-        Func1<Action1<Integer>, Map<Integer, Object>> evictingMapFactory =  //
-                new Func1<Action1<Integer>, Map<Integer, Object>>() {
+        Func1<Action1<Object>, Map<Integer, Object>> evictingMapFactory =  //
+                new Func1<Action1<Object>, Map<Integer, Object>>() {
 
                     @Override
-                    public Map<Integer, Object> call(final Action1<Integer> notify) {
+                    public Map<Integer, Object> call(final Action1<Object> notify) {
                         throw ex;
                     }
                 };
@@ -2072,7 +2072,7 @@ public class OperatorGroupByTest {
     @Test
     public void mapFactoryExpiryCompletesGroupedFlowable() {
         final List<Integer> completed = new CopyOnWriteArrayList<Integer>();
-        Func1<Action1<Integer>, Map<Integer, Object>> evictingMapFactory = createEvictingMapFactorySynchronousOnly(1);
+        Func1<Action1<Object>, Map<Integer, Object>> evictingMapFactory = createEvictingMapFactorySynchronousOnly(1);
         PublishSubject<Integer> subject = PublishSubject.create();
         AssertableSubscriber<Integer> ts = subject.onBackpressureBuffer()
                 .groupBy(UtilityFunctions.<Integer>identity(), UtilityFunctions.<Integer>identity(), evictingMapFactory)
@@ -2103,7 +2103,7 @@ public class OperatorGroupByTest {
         //javadoc will be a version of this using lambdas and without assertions
         final List<Integer> completed = new CopyOnWriteArrayList<Integer>();
         //size should be less than 5 to notice the effect
-        Func1<Action1<Integer>, Map<Integer, Object>> evictingMapFactory = createEvictingMapFactoryGuava(3);
+        Func1<Action1<Object>, Map<Integer, Object>> evictingMapFactory = createEvictingMapFactoryGuava(3);
         int numValues = 1000;
         AssertableSubscriber<Integer> ts =
             Observable.range(1, numValues)
@@ -2118,7 +2118,7 @@ public class OperatorGroupByTest {
 
     @Test
     public void mapFactoryEvictionQueueClearedOnErrorCoverageOnly() {
-        Func1<Action1<Integer>, Map<Integer, Object>> evictingMapFactory = createEvictingMapFactorySynchronousOnly(1);
+        Func1<Action1<Object>, Map<Integer, Object>> evictingMapFactory = createEvictingMapFactorySynchronousOnly(1);
         PublishSubject<Integer> subject = PublishSubject.create();
         AssertableSubscriber<Integer> ts = subject
                 .onBackpressureBuffer()
@@ -2158,9 +2158,9 @@ public class OperatorGroupByTest {
         private final List<K> list = new ArrayList<K>();
         private final Map<K,V> map = new HashMap<K,V>();
         private final int maxSize;
-        private final Action1<K> evictedListener;
+        private final Action1<Object> evictedListener;
 
-        SingleThreadEvictingHashMap(int maxSize, Action1<K> evictedListener) {
+        SingleThreadEvictingHashMap(int maxSize, Action1<Object> evictedListener) {
             this.maxSize = maxSize;
             this.evictedListener = evictedListener;
         }
@@ -2199,8 +2199,7 @@ public class OperatorGroupByTest {
                 //remove first
                 k = list.get(0);
                 list.remove(0);
-                v = map.get(k);
-                map.remove(k);
+                v = map.remove(k);
             } else {
                 v = null;
                 k = null;
@@ -2208,12 +2207,7 @@ public class OperatorGroupByTest {
             list.add(key);
             V result = map.put(key, value);
             if (v != null) {
-                try {
-                    //TODO report value not key
-                    evictedListener.call(k);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+                evictedListener.call(v);
             }
             return result;
         }
@@ -2249,23 +2243,18 @@ public class OperatorGroupByTest {
         }
     }
 
-    private static Func1<Action1<Integer>, Map<Integer, Object>> createEvictingMapFactoryGuava(final int maxSize) {
-        Func1<Action1<Integer>, Map<Integer, Object>> evictingMapFactory =  //
-                new Func1<Action1<Integer>, Map<Integer, Object>>() {
+    private static Func1<Action1<Object>, Map<Integer, Object>> createEvictingMapFactoryGuava(final int maxSize) {
+        Func1<Action1<Object>, Map<Integer, Object>> evictingMapFactory =  //
+                new Func1<Action1<Object>, Map<Integer, Object>>() {
 
             @Override
-            public Map<Integer, Object> call(final Action1<Integer> notify) {
+            public Map<Integer, Object> call(final Action1<Object> notify) {
                 return CacheBuilder.newBuilder() //
                         .maximumSize(maxSize) //
                         .removalListener(new RemovalListener<Integer, Object>() {
                             @Override
                             public void onRemoval(RemovalNotification<Integer,Object> notification) {
-                                try {
-                                    //TODO return value instead of key
-                                    notify.call(notification.getKey());
-                                } catch (Exception e) {
-                                    throw new RuntimeException(e);
-                                }
+                                notify.call(notification.getValue());
                             }})
                         .<Integer, Object> build()
                         .asMap();
@@ -2273,20 +2262,16 @@ public class OperatorGroupByTest {
         return evictingMapFactory;
     }
 
-    private static Func1<Action1<Integer>, Map<Integer, Object>> createEvictingMapFactorySynchronousOnly(final int maxSize) {
-        Func1<Action1<Integer>, Map<Integer, Object>> evictingMapFactory =  //
-                new Func1<Action1<Integer>, Map<Integer, Object>>() {
+    private static Func1<Action1<Object>, Map<Integer, Object>> createEvictingMapFactorySynchronousOnly(final int maxSize) {
+        Func1<Action1<Object>, Map<Integer, Object>> evictingMapFactory =  //
+                new Func1<Action1<Object>, Map<Integer, Object>>() {
 
                     @Override
-                    public Map<Integer, Object> call(final Action1<Integer> notify) {
-                        return new SingleThreadEvictingHashMap<Integer,Object>(maxSize, new Action1<Integer>() {
+                    public Map<Integer, Object> call(final Action1<Object> notify) {
+                        return new SingleThreadEvictingHashMap<Integer,Object>(maxSize, new Action1<Object>() {
                                     @Override
-                                    public void call(Integer key) {
-                                        try {
-                                            notify.call(key);
-                                        } catch (Exception e) {
-                                            throw new RuntimeException(e);
-                                        }
+                                    public void call(Object group) {
+                                            notify.call(group);
                                     }});
                     }};
         return evictingMapFactory;
