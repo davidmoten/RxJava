@@ -2214,16 +2214,20 @@ public class OperatorGroupByTest {
 
         @Override
         public V remove(Object key) {
+            list.remove(key);
             return map.remove(key);
         }
 
         @Override
         public void putAll(Map<? extends K, ? extends V> m) {
-            map.putAll(m);
+            for (Entry<? extends K, ? extends V> entry: m.entrySet()) {
+                put(entry.getKey(), entry.getValue());
+            }
         }
 
         @Override
         public void clear() {
+            list.clear();
             map.clear();
         }
 

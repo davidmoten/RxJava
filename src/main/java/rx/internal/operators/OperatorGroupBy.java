@@ -73,16 +73,26 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
 
     @Override
     public Subscriber<? super T> call(Subscriber<? super GroupedObservable<K, V>> child) {
-        final GroupBySubscriber<T, K, V> parent; // NOPMD
+
+        final Map<Object, GroupedUnicast<K, V>> groups;
+        final Queue<GroupedUnicast<K, V>> evictedGroups;
         try {
-            parent = new GroupBySubscriber<T, K, V>(child, keySelector, valueSelector, bufferSize, delayError, mapFactory);
+		    if (mapFactory == null) {
+		        evictedGroups = null;
+		        groups = new ConcurrentHashMap<Object, GroupedUnicast<K, V>>();
+		    } else {
+		        evictedGroups = new ConcurrentLinkedQueue<GroupedUnicast<K, V>>();
+		        groups = (Map<Object, GroupedUnicast<K,V>>)(Map<Object, ?>) 
+		            mapFactory.call((Action1<Object>)(Action1<?>) new EvictionAction<K, V>(evictedGroups));
+		    }
         } catch (Throwable ex) {
-            //Can reach here because mapFactory.call() may throw in constructor of GroupBySubscriber
             Exceptions.throwOrReport(ex, child);
-            Subscriber<? super T> parent2 = Subscribers.empty();
-            parent2.unsubscribe();
-            return parent2;
+            Subscriber<? super T> parent = Subscribers.empty();
+            parent.unsubscribe();
+            return parent;
         }
+        final GroupBySubscriber<T, K, V> parent; // NOPMD
+        parent = new GroupBySubscriber<T, K, V>(child, keySelector, valueSelector, bufferSize, delayError, groups, evictedGroups);
 
         child.add(Subscriptions.create(new Action0() {
             @Override
@@ -106,6 +116,20 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
         public void request(long n) {
             parent.requestMore(n);
         }
+    }
+
+    static class EvictionAction<K, V> implements Action1<GroupedUnicast<K, V>> {
+
+            final Queue<GroupedUnicast<K, V>> evictedGroups;
+
+            EvictionAction(Queue<GroupedUnicast<K, V>> evictedGroups) {
+                this.evictedGroups = evictedGroups;
+            }
+
+            @Override
+            public void call(GroupedUnicast<K,V> group) {
+                evictedGroups.offer(group);
+            }
     }
 
     public static final class GroupBySubscriber<T, K, V>
@@ -138,7 +162,7 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
         @SuppressWarnings("unchecked")
         public GroupBySubscriber(Subscriber<? super GroupedObservable<K, V>> actual, Func1<? super T, ? extends K> keySelector,
                 Func1<? super T, ? extends V> valueSelector, int bufferSize, boolean delayError,
-                Func1<Action1<Object>, Map<K, Object>> mapFactory) {
+                Map<Object, GroupedUnicast<K, V>> groups, Queue<GroupedUnicast<K, V>> evictedGroups) {
             this.actual = actual;
             this.keySelector = keySelector;
             this.valueSelector = valueSelector;
@@ -152,28 +176,8 @@ public final class OperatorGroupBy<T, K, V> implements Operator<GroupedObservabl
             this.requested = new AtomicLong();
             this.groupCount = new AtomicInteger(1);
             this.wip = new AtomicInteger();
-            if (mapFactory == null) {
-                this.evictedGroups = null;
-                this.groups = new ConcurrentHashMap<Object, GroupedUnicast<K, V>>();
-            } else {
-                this.evictedGroups = new ConcurrentLinkedQueue<GroupedUnicast<K, V>>();
-                this.groups = (Map<Object, GroupedUnicast<K,V>>)(Map<Object, ?>) 
-                        mapFactory.call((Action1<Object>)(Action1<?>)new EvictionAction<K, V>(evictedGroups));
-            }
-        }
-
-        static class EvictionAction<K, V> implements Action1<GroupedUnicast<K, V>> {
-
-            final Queue<GroupedUnicast<K, V>> evictedGroups;
-
-            EvictionAction(Queue<GroupedUnicast<K, V>> evictedGroups) {
-                this.evictedGroups = evictedGroups;
-            }
-
-            @Override
-            public void call(GroupedUnicast<K,V> group) {
-                evictedGroups.offer(group);
-            }
+            this.groups = groups;
+            this.evictedGroups = evictedGroups;
         }
 
         @Override
