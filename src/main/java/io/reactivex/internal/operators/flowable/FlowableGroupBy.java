@@ -182,12 +182,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
 
             group.onNext(v);
 
-            if (evictedGroups != null) {
-                GroupedUnicast<K, V> evictedGroup;
-                while ((evictedGroup = evictedGroups.poll()) != null) {
-                    evictedGroup.onComplete();
-                }
-            }
+            completeEvictedGroups();
 
             if (newGroup) {
                 q.offer(group);
@@ -235,18 +230,22 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 drain();
             }
         }
+        
+        private void completeEvictedGroups() {
+            if (evictedGroups != null) {
+                GroupedUnicast<K, V> evictedGroup;
+                while ((evictedGroup = evictedGroups.poll()) != null) {
+                    evictedGroup.onComplete();
+                }
+            }
+        }
 
         @Override
         public void cancel() {
             // cancelling the main source means we don't want any more groups
             // but running groups still require new values
             if (cancelled.compareAndSet(false, true)) {
-                if (evictedGroups != null) {
-                    GroupedUnicast<K, V> evictedGroup;
-                    while ((evictedGroup = evictedGroups.poll()) != null) {
-                        evictedGroup.onComplete();
-                    }
-                }
+                completeEvictedGroups();
                 if (groupCount.decrementAndGet() == 0) {
                     s.cancel();
                 }
