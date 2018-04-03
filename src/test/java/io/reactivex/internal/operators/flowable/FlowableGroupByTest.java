@@ -13,32 +13,66 @@
 
 package io.reactivex.internal.operators.flowable;
 
-import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 import org.mockito.Mockito;
-import org.reactivestreams.*;
+import org.reactivestreams.Publisher;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 
-import com.google.common.cache.*;
+import com.google.common.base.Ticker;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.RemovalListener;
+import com.google.common.cache.RemovalNotification;
 
-import io.reactivex.*;
+import io.reactivex.BackpressureStrategy;
+import io.reactivex.Flowable;
+import io.reactivex.Notification;
+import io.reactivex.Scheduler;
+import io.reactivex.TestHelper;
 import io.reactivex.exceptions.TestException;
 import io.reactivex.flowables.GroupedFlowable;
-import io.reactivex.functions.*;
+import io.reactivex.functions.Action;
+import io.reactivex.functions.Consumer;
+import io.reactivex.functions.Function;
+import io.reactivex.functions.Predicate;
 import io.reactivex.internal.functions.Functions;
 import io.reactivex.internal.fuseable.QueueFuseable;
 import io.reactivex.internal.subscriptions.BooleanSubscription;
+import io.reactivex.processors.FlowableProcessor;
 import io.reactivex.processors.PublishProcessor;
 import io.reactivex.schedulers.Schedulers;
+import io.reactivex.schedulers.TestScheduler;
 import io.reactivex.subjects.PublishSubject;
-import io.reactivex.subscribers.*;
+import io.reactivex.subscribers.DefaultSubscriber;
+import io.reactivex.subscribers.SubscriberFusion;
+import io.reactivex.subscribers.TestSubscriber;
 
 public class FlowableGroupByTest {
 
@@ -1932,6 +1966,45 @@ public class FlowableGroupByTest {
         ts.assertNoValues()
           .assertError(ex);
     }
+    
+    @Test
+    public void testGroupByEvictionCancellationIssue5933() {
+        FlowableProcessor<Integer> source = PublishProcessor.create();
+        final TestScheduler scheduler = new TestScheduler();
+        Function<Consumer<Object>, Map<Integer, Object>> mapFactory = createEvictingMapFactorySynchronousOnlyDelayed(2, scheduler, 1, TimeUnit.SECONDS);
+        final AtomicInteger completed = new AtomicInteger();
+
+        Flowable<Integer> stream = source
+                .groupBy(Functions.<Integer>identity(), Functions.<Integer>identity(), false, Flowable.bufferSize(), mapFactory)
+                .flatMap(new Function<GroupedFlowable<Integer, Integer>, Publisher<? extends Integer>>() {
+                    @Override
+                    public Publisher<? extends Integer> apply(GroupedFlowable<Integer, Integer> group)
+                            throws Exception {
+                            return group
+                                .doOnComplete(new Action() {
+                                    @Override
+                                    public void run() throws Exception {
+                                        completed.incrementAndGet();
+                                    }
+                                });
+      }
+                });
+        TestSubscriber<Integer> subscriber = stream.test();
+        
+        source.onNext(1);
+        source.onNext(2);
+        //this emission will force a completion (eventually)
+        source.onNext(3);
+        assertEquals(0, completed.get());
+        
+        scheduler.advanceTimeBy(1,  TimeUnit.SECONDS);
+
+        assertEquals(0, completed.get());
+        
+        subscriber.cancel();
+        
+        assertEquals(1, completed.get());
+    }
 
     private static Function<GroupedFlowable<Integer, Integer>, Publisher<? extends Integer>> addCompletedKey(
             final List<Integer> completed) {
@@ -2082,6 +2155,29 @@ public class FlowableGroupByTest {
                                         } catch (Exception e) {
                                             throw new RuntimeException(e);
                                         }
+                                    }});
+                    }};
+        return evictingMapFactory;
+    }
+    
+    private static Function<Consumer<Object>, Map<Integer, Object>> createEvictingMapFactorySynchronousOnlyDelayed(final int maxSize, final Scheduler scheduler, final int delay, final TimeUnit unit) {
+        Function<Consumer<Object>, Map<Integer, Object>> evictingMapFactory =  //
+                new Function<Consumer<Object>, Map<Integer, Object>>() {
+
+                    @Override
+                    public Map<Integer, Object> apply(final Consumer<Object> notify) throws Exception {
+                        return new SingleThreadEvictingHashMap<Integer,Object>(maxSize, new Consumer<Object>() {
+                                    @Override
+                                    public void accept(final Object object) {
+                                        scheduler.scheduleDirect(new Runnable() {
+                                            @Override
+                                            public void run() {
+                                            try {
+                                                notify.accept(object);
+                                            } catch (Exception e) {
+                                                throw new RuntimeException(e);
+                                            }}
+                                        });
                                     }});
                     }};
         return evictingMapFactory;
