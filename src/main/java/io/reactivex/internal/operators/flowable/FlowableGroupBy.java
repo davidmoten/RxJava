@@ -51,23 +51,22 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
         this.mapFactory = mapFactory;
     }
 
-    @Override
     @SuppressWarnings({ "unchecked", "rawtypes" })
+    @Override
     protected void subscribeActual(Subscriber<? super GroupedFlowable<K, V>> s) {
 
         final Map<Object, GroupedUnicast<K, V>> groups;
         final Queue<GroupedUnicast<K, V>> evictedGroups;
-        final AtomicBoolean cancelled = new AtomicBoolean();
-        final AtomicBoolean sourceDone = new AtomicBoolean();
-
+        final EvictionAction<T, K, V> evictionAction;
         try {
             if (mapFactory == null) {
                 evictedGroups = null;
                 groups = new ConcurrentHashMap<Object, GroupedUnicast<K, V>>();
+                evictionAction = null;
             } else {
                 evictedGroups = new ConcurrentLinkedQueue<GroupedUnicast<K, V>>();
-                Consumer<Object> evictionAction = (Consumer<Object>)(Consumer<?>) new EvictionAction<K, V>(evictedGroups, cancelled,  sourceDone);
-                groups = (Map) mapFactory.apply(evictionAction);
+                evictionAction = new EvictionAction<T, K, V>(evictedGroups);
+                groups = (Map) mapFactory.apply((Consumer) evictionAction);
             }
         } catch (Exception e) {
             Exceptions.throwIfFatal(e);
@@ -76,7 +75,11 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             return;
         }
         GroupBySubscriber<T, K, V> subscriber =
-                new GroupBySubscriber<T, K, V>(s, keySelector, valueSelector, bufferSize, delayError, groups, evictedGroups, cancelled, sourceDone);
+                new GroupBySubscriber<T, K, V>(s, keySelector, valueSelector, bufferSize, delayError, groups, evictedGroups);
+        if (evictionAction != null) {
+            evictionAction.subscriber = subscriber;
+        }
+        //TODO memory barrier required so that evictionAction.subscriber is visible?
         source.subscribe(subscriber);
     }
 
@@ -99,23 +102,21 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
 
         Subscription s;
 
-        final AtomicBoolean cancelled;
-        final AtomicBoolean sourceDone;
-
+        final AtomicBoolean cancelled = new AtomicBoolean();
         final AtomicLong requested = new AtomicLong();
-
         final AtomicInteger groupCount = new AtomicInteger(1);
+        final AtomicBoolean sourceDone;
+        final AtomicInteger evictionWip;
 
         Throwable error;
+        
         volatile boolean done;
 
         boolean outputFused;
 
-
         public GroupBySubscriber(Subscriber<? super GroupedFlowable<K, V>> actual, Function<? super T, ? extends K> keySelector,
                 Function<? super T, ? extends V> valueSelector, int bufferSize, boolean delayError,
-                Map<Object, GroupedUnicast<K, V>> groups, Queue<GroupedUnicast<K, V>> evictedGroups, 
-                AtomicBoolean cancelled, AtomicBoolean sourceDone) {
+                Map<Object, GroupedUnicast<K, V>> groups, Queue<GroupedUnicast<K, V>> evictedGroups) {
             this.actual = actual;
             this.keySelector = keySelector;
             this.valueSelector = valueSelector;
@@ -124,8 +125,13 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             this.groups = groups;
             this.evictedGroups = evictedGroups;
             this.queue = new SpscLinkedArrayQueue<GroupedFlowable<K, V>>(bufferSize);
-            this.cancelled = cancelled;
-            this.sourceDone = sourceDone;
+            if (evictedGroups != null) {
+                sourceDone = new AtomicBoolean();
+                evictionWip = new AtomicInteger();
+            } else {
+                sourceDone = null;
+                evictionWip = null;
+            }
         }
 
         @Override
@@ -199,29 +205,29 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 RxJavaPlugins.onError(t);
                 return;
             }
-            completeEvictedGroupsAndSetSourceDone();
             for (GroupedUnicast<K, V> g : groups.values()) {
                 g.onError(t);
             }
             groups.clear();
             error = t;
             done = true;
+            drainEvictedIfCancelledOrDone();
             drain();
         }
 
         @Override
         public void onComplete() {
             if (!done) {
-                completeEvictedGroupsAndSetSourceDone();
-                for (GroupedUnicast<K, V> g : groups.values()) {
+                for (GroupedUnicast<K, V> g: groups.values()) {
                     g.onComplete();
                 }
                 groups.clear();
                 done = true;
+                drainEvictedIfCancelledOrDone();
                 drain();
             }
         }
-
+        
         @Override
         public void request(long n) {
             if (SubscriptionHelper.validate(n)) {
@@ -229,22 +235,32 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 drain();
             }
         }
-
-        private void completeEvictedGroupsAndSetSourceDone() {
-            if (evictedGroups != null) {
-                sourceDone.set(true);
-                GroupedUnicast<K, V> evictedGroup;
-                while ((evictedGroup = evictedGroups.poll()) != null) {
-                    evictedGroup.onComplete();
-                }
-            }            
-        }
         
+        void drainEvictedIfCancelledOrDone() {
+            if (evictedGroups != null) {
+                if (evictionWip.getAndIncrement() == 0) {
+                    int missed = 1;
+                    while (true) {
+                        if (done || cancelled.get()) {
+                            GroupedUnicast<K, V> g;
+                            while ((g = evictedGroups.poll()) != null) {
+                                g.onComplete();
+                            }
+                        }
+                        missed = evictionWip.addAndGet(-missed);
+                        if (missed == 0) {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         private void completeEvictedGroups() {
             if (evictedGroups != null) {
-                GroupedUnicast<K, V> evictedGroup;
-                while ((evictedGroup = evictedGroups.poll()) != null) {
-                    evictedGroup.onComplete();
+                GroupedUnicast<K, V> g;
+                while ((g = evictedGroups.poll()) != null) {
+                    g.onComplete();
                 }
             }
         }
@@ -254,7 +270,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             // cancelling the main source means we don't want any more groups
             // but running groups still require new values
             if (cancelled.compareAndSet(false, true)) {
-                completeEvictedGroups();
+                drainEvictedIfCancelledOrDone();
                 if (groupCount.decrementAndGet() == 0) {
                     s.cancel();
                 }
@@ -266,7 +282,6 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             groups.remove(mapKey);
             if (groupCount.decrementAndGet() == 0) {
                 s.cancel();
-
                 if (getAndIncrement() == 0) {
                     queue.clear();
                 }
@@ -435,27 +450,19 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
         }
     }
 
-    static final class EvictionAction<K, V> implements Consumer<GroupedUnicast<K,V>> {
+    static final class EvictionAction<T, K, V> implements Consumer<GroupedUnicast<K,V>> {
 
         final Queue<GroupedUnicast<K, V>> evictedGroups;
-        final AtomicBoolean cancelled;
-        final AtomicBoolean sourceDone;
+        GroupBySubscriber<T, K, V> subscriber;
 
-        EvictionAction(Queue<GroupedUnicast<K, V>> evictedGroups, AtomicBoolean cancelled, AtomicBoolean sourceDone) {
+        EvictionAction(Queue<GroupedUnicast<K, V>> evictedGroups) {
             this.evictedGroups = evictedGroups;
-            this.cancelled = cancelled;
-            this.sourceDone = sourceDone;
         }
 
         @Override
         public void accept(GroupedUnicast<K,V> group) {
-            if (!cancelled.get() && !sourceDone.get()) {
-                evictedGroups.offer(group);
-            } else {
-                // note that this call to `onComplete` is safe because 
-                // GroupedUnicast is designed to allow concurrent access
-                group.onComplete();
-            }
+            evictedGroups.offer(group);
+            subscriber.drainEvictedIfCancelledOrDone();
         }
     }
 
