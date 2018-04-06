@@ -211,7 +211,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             groups.clear();
             error = t;
             done = true;
-            drainEvictedIfCancelledOrDone();
+            drainEvictedIfDone();
             drain();
         }
 
@@ -223,7 +223,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 }
                 groups.clear();
                 done = true;
-                drainEvictedIfCancelledOrDone();
+                drainEvictedIfDone();
                 drain();
             }
         }
@@ -236,12 +236,12 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             }
         }
         
-        void drainEvictedIfCancelledOrDone() {
+        void drainEvictedIfDone() {
             if (evictedGroups != null) {
                 if (evictionWip.getAndIncrement() == 0) {
                     int missed = 1;
                     while (true) {
-                        if (done || cancelled.get()) {
+                        if (done) {
                             GroupedUnicast<K, V> g;
                             while ((g = evictedGroups.poll()) != null) {
                                 g.onComplete();
@@ -270,7 +270,6 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             // cancelling the main source means we don't want any more groups
             // but running groups still require new values
             if (cancelled.compareAndSet(false, true)) {
-                drainEvictedIfCancelledOrDone();
                 if (groupCount.decrementAndGet() == 0) {
                     s.cancel();
                 }
@@ -462,7 +461,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
         @Override
         public void accept(GroupedUnicast<K,V> group) {
             evictedGroups.offer(group);
-            subscriber.drainEvictedIfCancelledOrDone();
+            subscriber.drainEvictedIfDone();
         }
     }
 
