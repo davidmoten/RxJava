@@ -26,6 +26,7 @@ import org.junit.Test;
 import org.mockito.Mockito;
 import org.reactivestreams.*;
 
+import com.google.common.base.Ticker;
 import com.google.common.cache.*;
 
 import io.reactivex.*;
@@ -1986,6 +1987,101 @@ public class FlowableGroupByTest {
                 });
             }
         };
+    }
+    
+    private static final class TestTicker extends Ticker {
+        long tick = 0;
+
+        @Override
+        public long read() {
+            return tick;
+        }
+    }
+    
+    @Test
+    public void testGroupByEviction() {
+        PublishProcessor<Integer> source = PublishProcessor.create();
+        final TestTicker testTicker = new TestTicker();
+
+        Function<Consumer<Object>, Map<Integer, Object>> mapFactory = new Function<Consumer<Object>, Map<Integer, Object>>() {
+            @Override
+            public Map<Integer, Object> apply(final Consumer<Object> action) throws Exception {
+                return CacheBuilder.newBuilder()
+                        .expireAfterAccess(5, TimeUnit.SECONDS)
+                        .removalListener(new RemovalListener<Object, Object>() {
+                            @Override
+                            public void onRemoval(RemovalNotification<Object, Object> notification) {
+                                try {
+                                    action.accept(notification.getValue());
+                                } catch (Exception ex) {
+                                    throw new RuntimeException(ex);
+                                }
+                            }
+                        }).ticker(testTicker).<Integer, Object>build().asMap();
+            }
+        };
+
+        final List<String> list = new CopyOnWriteArrayList<String>();
+        Flowable<Integer> stream = source.doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                list.add("Source canceled");
+            }
+        })
+                .<Integer,Integer>groupBy(Functions.<Integer>identity(), Functions.<Integer>identity(), false, Flowable.bufferSize(), mapFactory)
+                .flatMap(new Function<GroupedFlowable<Integer, Integer>, Publisher<? extends Integer>>() {
+                    @Override
+                    public Publisher<? extends Integer> apply(GroupedFlowable<Integer, Integer> group) throws Exception {
+         return group
+                        .doOnComplete(new Action() {
+                            @Override
+                            public void run() throws Exception {
+                                list.add("Group completed");
+                            }
+                        })
+                        .doOnCancel(new Action() {
+                            @Override
+                            public void run() throws Exception {
+                                list.add("Group canceled");
+                            }
+                        });
+      }
+                });
+        TestSubscriber<Integer> ts = stream.doOnCancel(new Action() {
+            @Override
+            public void run() throws Exception {
+                list.add("Outer group by canceled.");
+            }
+        }).test();
+        
+        // Send 3 in the same group and wait for them to be seen
+        source.onNext(1);
+        source.onNext(1);
+        source.onNext(1);
+        ts.awaitCount(3);
+        
+        // Advance time far enough to evict the group.
+        // NOTE -- Comment this line out to make the test "pass".
+        testTicker.tick = TimeUnit.SECONDS.toNanos(6);
+        
+        // Send more data in the group (triggering eviction and recreation)
+        source.onNext(1);
+        source.onNext(1);
+
+        // Wait for the last 2 and then cancel the subscription
+        ts.awaitCount(5);
+        ts.cancel();
+
+        // Observe the result.  Note that right now the result differs depending on whether eviction occurred or
+        // not.  The observed sequence in that case is:  Group completed, Outer group by canceled., Group canceled.
+        // The addition of the "Group completed" is actually fine, but the fact that the cancel doesn't reach the
+        // source seems like a bug.  Commenting out the setting of "tick" above will produce the "expected" sequence.
+        assertEquals(Arrays.asList(
+                // "Group completed", -- this is here when eviction occurs
+                "Outer group by canceled.", 
+                "Group canceled",
+                "Source canceled"  // This is *not* here when eviction occurs
+        ), list);
     }
 
     //not thread safe

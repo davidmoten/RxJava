@@ -282,6 +282,10 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
             if (groupCount.decrementAndGet() == 0) {
                 s.cancel();
                 if (getAndIncrement() == 0) {
+                    // this is a best endeavours affair in
+                    // that if the drain loop is running this won't
+                    // happen. This is ok (??) as we are just trying to 
+                    // help gc out.
                     queue.clear();
                 }
             }
