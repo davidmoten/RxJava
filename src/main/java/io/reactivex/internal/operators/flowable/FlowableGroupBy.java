@@ -104,7 +104,8 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
         final AtomicInteger groupCount = new AtomicInteger(1);
 
         Throwable error;
-        volatile boolean done;
+        volatile boolean finished;
+        boolean done;
 
         boolean outputFused;
 
@@ -192,6 +193,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 RxJavaPlugins.onError(t);
                 return;
             }
+            done = true;
             for (GroupedUnicast<K, V> g : groups.values()) {
                 g.onError(t);
             }
@@ -200,7 +202,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 evictedGroups.clear();
             }
             error = t;
-            done = true;
+            finished = true;
             drain();
         }
 
@@ -215,6 +217,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                     evictedGroups.clear();
                 }
                 done = true;
+                finished = true;
                 drain();
             }
         }
@@ -287,7 +290,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                     return;
                 }
 
-                boolean d = done;
+                boolean d = finished;
 
                 if (d && !delayError) {
                     Throwable ex = error;
@@ -329,7 +332,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                 long e = 0L;
 
                 while (e != r) {
-                    boolean d = done;
+                    boolean d = finished;
 
                     GroupedFlowable<K, V> t = q.poll();
 
@@ -348,7 +351,7 @@ public final class FlowableGroupBy<T, K, V> extends AbstractFlowableWithUpstream
                     e++;
                 }
 
-                if (e == r && checkTerminated(done, q.isEmpty(), a, q)) {
+                if (e == r && checkTerminated(finished, q.isEmpty(), a, q)) {
                     return;
                 }
 
